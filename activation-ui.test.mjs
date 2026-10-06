@@ -9,7 +9,7 @@ const adapter = require('./runtime-adapter.js');
 
 test('release version matches manifest, adapter and settings badge', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.5');
+  assert.equal(manifest.version, '0.1.7');
   assert.equal(adapter.VERSION, manifest.version);
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);

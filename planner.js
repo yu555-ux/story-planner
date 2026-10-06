@@ -1281,7 +1281,7 @@
       .twsp-head{padding:24px 34px 18px}.twsp-brand{display:flex;align-items:center;gap:15px;min-width:0}
       .twsp-brand-mark{display:grid;place-items:center;flex:none;width:54px;height:54px;border-radius:18px;background:#eedbb8;color:#8d5b21}
       .twsp-brand-mark svg{width:26px;height:26px;fill:currentColor;stroke:none}
-      .twsp-title{font-size:23px;line-height:1.25;font-weight:700}.twsp-head-subtitle{margin-top:2px;color:var(--twsp-muted);font-size:13px}
+      .twsp-title{font-size:23px;line-height:1.25;font-weight:700}.twsp-head-subtitle{max-width:100%;margin-top:2px;overflow-wrap:anywhere;color:var(--twsp-muted);font-size:13px}
       .twsp-activation{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;min-height:42px;border-color:var(--twsp-border);font-size:13px;white-space:nowrap}
       .twsp-activation[data-enabled="true"]{border-color:#dfe9df;background:var(--twsp-green);color:var(--twsp-green-ink)}
       .twsp-activation[data-enabled="true"]:before{content:"";width:8px;height:8px;border-radius:50%;background:#5d9b68}
@@ -1495,7 +1495,8 @@
     title.id = 'tw-story-planner-title-v1';
     const brand = element('div', 'twsp-brand');
     const brandText = element('div');
-    brandText.append(title, element('small', 'twsp-head-subtitle', '让故事的下一步更清晰'));
+    const chatLabel = element('small', 'twsp-head-subtitle', '未选择角色卡或聊天存档');
+    brandText.append(title, chatLabel);
     brand.append(inlineIcon('sparkle', 'twsp-brand-mark'), brandText);
     const closeButton = button('×', 'close', 'twsp-close');
     closeButton.setAttribute('aria-label', '关闭剧情规划器');
@@ -1974,6 +1975,7 @@
     }
     function render(syncFields = false) {
       const view = options.getViewModel();
+      chatLabel.textContent = view.chatLabel || '未选择角色卡或聊天存档';
       toggleEnabledButton.textContent = view.config.enabled ? '规划器已开启' : '开启规划器';
       toggleEnabledButton.dataset.enabled = String(view.config.enabled);
       toggleEnabledButton.setAttribute('aria-pressed', String(view.config.enabled));
@@ -2789,7 +2791,8 @@
 
     function getPanelViewModel() {
       const presetReady = hasEffectivePlannerPrompt(activePreset());
-      return { ...buildPanelViewModel(config, currentPlanningState(), scheduler.getStatus(), presetReady), presetReady };
+      return { ...buildPanelViewModel(config, currentPlanningState(), scheduler.getStatus(), presetReady),
+        presetReady, chatLabel: globals.getCurrentChatLabel?.() ?? '未选择角色卡或聊天存档' };
     }
 
     let testGenerationId = null;

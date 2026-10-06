@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.7';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);
@@ -328,6 +328,13 @@
       },
       getVariables({ type } = {}) {
         return type === 'chat' ? chatState() : clone(nativeSettings());
+      },
+      getCurrentChatLabel() {
+        const current = liveContext();
+        const character = current.characters?.[current.characterId];
+        const characterName = typeof character?.name === 'string' ? character.name.trim() : '';
+        const chatName = typeof current.chatId === 'string' ? current.chatId.trim() : '';
+        return characterName && chatName ? `${characterName}·${chatName}` : '未选择角色卡或聊天存档';
       },
       updateVariablesWith(updater, { type } = {}) {
         if (type === 'chat') saveChatState(updater(chatState()));
