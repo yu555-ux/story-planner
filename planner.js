@@ -1137,10 +1137,8 @@
     };
   }
 
-  function persistPlannerConfig(globals, draft, currentConfig = {}, clearKey = false) {
+  function persistPlannerConfig(globals, draft, currentConfig = {}) {
     const config = normalizeConfig({ ...DEFAULT_CONFIG, ...currentConfig, ...(isRecord(draft) ? draft : {}) });
-    if (!clearKey && !draft?.key) config.key = currentConfig.key || '';
-    if (clearKey) config.key = '';
     globals.updateVariablesWith((variables) => ({ ...(isRecord(variables) ? variables : {}), config }), {
       type: 'script',
     });
@@ -1550,7 +1548,10 @@
     const grid = element('div', 'twsp-grid');
     const apiurl = field('API 地址', 'apiurl', 'url');
     apiurl.wrapper.className += ' twsp-wide';
-    const key = field('API 密钥（留空保留已保存密钥）', 'key', 'password');
+    const key = field('API 密钥', 'key', 'password');
+    key.input.autocomplete = 'off';
+    key.input.placeholder = '请输入 API 密钥';
+    key.wrapper.append(element('small', 'twsp-hint', '已保存密钥会以圆点遮罩显示；可直接替换，清空并保存会移除。'));
     key.wrapper.className += ' twsp-wide';
     const model = field('模型名称', 'model');
     const modelRow = element('div', 'twsp-model-row');
@@ -1589,9 +1590,8 @@
     const checkButton = button('检查配置', 'check');
     const testButton = button('测试连接', 'test');
     const toolProbeButton = button('测试工具调用', 'toolProbe');
-    const clearKeyButton = button('清除密钥', 'clearKey');
     const saveButton = button('保存配置', 'save', 'twsp-button twsp-button--primary');
-    advancedActions.append(checkButton, clearKeyButton);
+    advancedActions.append(checkButton);
     advanced.append(advancedActions);
     settingsActions.append(saveButton);
     function settingsSection(label, symbol, opened = false) {
@@ -2026,15 +2026,14 @@
       retrySaveButton.hidden = !view.persistenceError;
       retrySaveButton.disabled = !view.persistenceError;
       runButton.disabled = Object.keys(view.configErrors).length > 0 || ['running', 'retrying'].includes(view.status) || view.presetReady === false;
-      keyStatus.textContent = view.config.key ? '已保存密钥；圆点仅作遮罩提示，留空保存会继续使用该密钥。' : '尚未填写密钥；无密钥接口可留空。';
-      key.input.placeholder = view.config.key ? '••••••••••••' : '请输入 API 密钥';
+      keyStatus.textContent = view.config.key ? 'API 密钥已保存。' : '尚未填写密钥；无密钥接口可留空。';
       if (activeTab === 'presets' && previewStamp && previewContextHash && Date.now() - lastPreviewCheck > 5000) {
         lastPreviewCheck = Date.now(); const stamp = previewStamp;
         Promise.resolve(options.checkPreviewFresh?.(previewContextHash)).then(current => { if (stamp === previewStamp && current === false) invalidatePreview(); }).catch(() => invalidatePreview());
       }
       if (syncFields) {
         apiurl.input.value = view.config.apiurl;
-        key.input.value = '';
+        key.input.value = view.config.key;
         model.input.value = view.config.model;
         timeout.input.value = String(view.config.timeoutSeconds);
         retryCount.input.value = String(view.config.retryCount ?? DEFAULT_CONFIG.retryCount);
@@ -2270,15 +2269,9 @@
       const saved = options.saveConfig(draft());
       const errors = validateConfig(saved);
       showValidation(errors);
-      key.input.value = '';
+      key.input.value = saved.key;
       render(false);
       await confirmConfigSave(Object.keys(errors).length > 0);
-    });
-    clearKeyButton.addEventListener('click', async () => {
-      options.saveConfig(draft(), true);
-      key.input.value = '';
-      render(false);
-      await confirmConfigSave();
     });
     toggleEnabledButton.addEventListener('click', async () => {
       const nextEnabled = !options.getViewModel().config.enabled;
@@ -2796,13 +2789,13 @@
 
     let testGenerationId = null;
     let configRevision = 0;
-    function savePanelConfig(draft, clearKey = false) {
+    function savePanelConfig(draft) {
       scheduler.changeChat();
       lastSentPrompt = null;
       lastPreparedRequest = null;
       if (testGenerationId) globals.stopGenerationById(testGenerationId);
       configRevision += 1;
-      config = persistPlannerConfig(globals, draft, config, clearKey);
+      config = persistPlannerConfig(globals, draft, config);
       lifecycle.invalidate();
       log.info?.(`[剧情规划器][状态] ${config.enabled ? '已开启' : '已关闭'}`);
       return config;
