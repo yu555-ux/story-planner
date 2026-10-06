@@ -1162,9 +1162,9 @@
     root.setAttribute('aria-labelledby', 'tw-story-planner-title-v1');
     const style = doc.createElement('style');
     style.textContent = `
-      .twsp-dialog{width:min(1180px,calc(100vw - 20px));max-height:calc(100dvh - 24px);padding:0;border:1px solid #48251f;border-radius:0;color:#e9c39e;background:#170807}
+      .twsp-dialog{box-sizing:border-box;width:min(1080px,calc(100vw - 24px));height:min(840px,calc(100vh - 24px));height:min(840px,calc(100dvh - 24px));max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow:hidden;padding:0;border:1px solid #48251f;border-radius:0;color:#e9c39e;background:#170807}
       .twsp-dialog::backdrop{background:rgba(7,2,2,.78)}
-      .twsp-shell{box-sizing:border-box;max-height:calc(100dvh - 24px);overflow:auto;padding:24px 30px;font:15px/1.5 system-ui,"Microsoft YaHei",sans-serif}
+      .twsp-shell{box-sizing:border-box;display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100%;min-height:0;overflow:hidden;padding:24px 30px;font:15px/1.5 system-ui,"Microsoft YaHei",sans-serif}
       .twsp-head,.twsp-tabs,.twsp-actions,.twsp-statusline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
       .twsp-head{justify-content:space-between}.twsp-title{margin:0;font-size:20px}.twsp-activation{margin-left:auto;border-color:#a16937;background:#3f2415;color:#ffe0ac;font-weight:700}
       .twsp-activation[data-enabled="true"]{border-color:#588b65;background:#203d2b;color:#d6f5db}
@@ -1172,9 +1172,9 @@
       .twsp-close{min-width:42px;font-size:20px}.twsp-button--primary,.twsp-tab[aria-selected="true"]{border-color:#9b602c;background:#573013;color:#ffd994}
       .twsp-button:disabled{opacity:.5;cursor:not-allowed}
       .twsp-button:focus-visible,.twsp-close:focus-visible,.twsp-tab:focus-visible,.twsp-input:focus-visible{outline:2px solid #d5964e;outline-offset:2px}
-      .twsp-tabs{margin:14px 0}.twsp-panel{padding:18px;border:1px solid #48251f;background:#170807}
+      .twsp-tabs{margin:14px 0}.twsp-panel{min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:18px;border:1px solid #48251f;background:#170807}
       .twsp-statusline{margin-bottom:12px;color:#ae8777}.twsp-badge{padding:4px 10px;background:#4b2521}
-      .twsp-raw{white-space:pre-wrap;overflow-wrap:anywhere;max-height:50dvh;overflow:auto;margin:0;font:inherit}
+      .twsp-raw{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit}
       .twsp-grid{display:grid;grid-template-columns:1fr;gap:18px}.twsp-field{display:grid;gap:5px;min-width:0;color:#a87967}.twsp-wide{grid-column:1/-1}
       .twsp-input{box-sizing:border-box;width:100%;min-height:48px;padding:9px 14px;border:1px solid #4b2521;border-radius:0;color:#e9c39e;background:#1b0a09;font:inherit}
       .twsp-model-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}.twsp-model-row>.twsp-button{min-height:48px}
@@ -1275,7 +1275,7 @@
         --twsp-bg:#faf8f4;--twsp-surface:#fff;--twsp-ink:#26312d;--twsp-muted:#5d6962;
         --twsp-faint:#68756d;--twsp-border:#e9e2d8;--twsp-brand:#995d19;--twsp-brand-hover:#824d14;
         --twsp-soft:#faf7f2;--twsp-green:#e8f0e8;--twsp-green-ink:#416148;
-        width:min(1080px,calc(100vw - 24px));border-color:var(--twsp-border);background:var(--twsp-bg);color:var(--twsp-ink)
+        border-color:var(--twsp-border);background:var(--twsp-bg);color:var(--twsp-ink)
       }
       .twsp-shell{font:16px/1.55 system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
       .twsp-head{padding:24px 34px 18px}.twsp-brand{display:flex;align-items:center;gap:15px;min-width:0}
@@ -1399,6 +1399,7 @@
       @media(max-width:520px){
         .twsp-head{gap:8px}.twsp-head-subtitle{display:none}.twsp-brand{gap:9px}.twsp-brand-mark{width:40px;height:40px}
         .twsp-activation{order:3;margin-left:0;min-height:38px;padding:7px 10px;font-size:12px}.twsp-close{margin-left:auto}
+        .twsp-tabs{gap:2px;overflow-x:hidden;justify-content:space-between}.twsp-tab{gap:5px;padding:8px;font-size:13px}.twsp-tab .twsp-inline-icon svg{width:16px;height:16px}
         .twsp-page-heading .twsp-button--primary{width:100%}.twsp-page-heading{align-items:flex-start}
         .twsp-result-card{padding:20px}.twsp-result-top{align-items:flex-start;flex-wrap:wrap}.twsp-outline-event-box{padding:16px}
         .twsp-history-main small{white-space:normal}.twsp-history-state{display:none}
@@ -1407,6 +1408,10 @@
         .twsp-preset-card{align-items:flex-start;flex-wrap:wrap}.twsp-preset-card-controls{width:100%;justify-content:flex-end}
         .twsp-prompt-subtitle{gap:5px;flex-wrap:wrap}.twsp-prompt-meta{gap:2px}.twsp-prompt-drag{width:20px}
         .twsp-prompt-editor{padding:16px}.twsp-preset-actions{justify-content:flex-start}
+      }
+      @media(max-height:560px){
+        .twsp-head{padding-top:10px;padding-bottom:8px}.twsp-brand-mark{width:40px;height:40px}
+        .twsp-tabs{padding-bottom:8px}.twsp-panel{padding-top:16px}
       }
       .twsp-dialog [hidden]{display:none!important}
       .twsp-dialog [data-tw-view="planningTask"]:empty,.twsp-dialog [data-tw-view="error"]:empty,
