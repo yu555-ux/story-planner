@@ -1243,6 +1243,34 @@
       @media(max-width:520px){.twsp-shell{padding:12px}.twsp-grid,.twsp-advanced-grid{grid-template-columns:1fr}.twsp-wide{grid-column:auto}.twsp-model-row{grid-template-columns:1fr}.twsp-model-row>.twsp-button{width:100%}}
       @media(max-width:720px){.twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}.twsp-prompt-head{flex-wrap:wrap;gap:8px;padding:8px 10px}.twsp-prompt-title{flex:1 1 120px}.twsp-prompt-meta{width:auto;grid-template-columns:auto 40px 30px 18px 18px;gap:8px}.twsp-prompt-editor{padding:14px}.twsp-preset-card{padding:8px}}
       @media(prefers-reduced-motion:reduce){.twsp-dialog *{animation:none!important;transition:none!important}}
+      .twsp-dialog{border:1px solid #e8e1d7;border-radius:26px;color:#26312d;background:#faf8f3;box-shadow:0 24px 65px #211b151f}
+      .twsp-dialog::backdrop{background:rgba(20,25,25,.55)}
+      .twsp-shell{padding:0;font:15px/1.55 system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .twsp-head{padding:22px 30px 17px;gap:12px}.twsp-title{font-size:20px;letter-spacing:-.02em}.twsp-head-subtitle{display:block;color:#8c9089;font-size:12px}
+      .twsp-button,.twsp-close,.twsp-tab{min-height:44px;border:1px solid #e6e0d7;border-radius:13px;color:#665f55;background:#fff;transition:background .18s ease,box-shadow .18s ease}
+      .twsp-button:hover,.twsp-close:hover,.twsp-tab:hover{background:#f5f0e9}
+      .twsp-button--primary,.twsp-tab[aria-selected="true"]{border-color:#a9671c;background:#a9671c;color:#fff}
+      .twsp-button--primary:hover,.twsp-tab[aria-selected="true"]:hover{background:#915718}
+      .twsp-activation{margin-left:auto;border-color:#d8e7d7;border-radius:999px;background:#edf3eb;color:#416148;font-size:13px}
+      .twsp-activation[data-enabled="true"]{border-color:#d8e7d7;background:#e8f0e8;color:#416148}
+      .twsp-close{width:44px;padding:5px;background:#efede8;color:#66706e}
+      .twsp-button:focus-visible,.twsp-close:focus-visible,.twsp-tab:focus-visible,.twsp-input:focus-visible,.twsp-prompt-icon:focus-visible,.twsp-prompt-title:focus-visible,.twsp-preset-card-name:focus-visible,.twsp-switch input:focus-visible{outline:2px solid #a9671c;outline-offset:2px}
+      .twsp-tabs{margin:0;padding:0 30px 16px;border-bottom:1px solid #e7e3dc;gap:6px}.twsp-tab{padding:9px 18px;border-color:transparent;border-radius:999px;background:transparent;color:#6f7875;font-weight:600}
+      .twsp-panel{margin:0;padding:30px;border:0;background:transparent}.twsp-panel[hidden]{display:none}
+      .twsp-page-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:23px}.twsp-page-title{margin:0;font-size:28px;line-height:1.2;letter-spacing:-.03em}.twsp-page-description{margin:5px 0 0;color:#8d948f;font-size:13px}.twsp-version{padding:6px 11px;border-radius:999px;background:#f2e5d4;color:#a9671c;font-size:12px;font-weight:700}
+      .twsp-statusline{gap:8px;color:#8d948f;font-size:12px}.twsp-badge{border-radius:999px;background:#f9edda;color:#9a641f;font-weight:700}.twsp-hint{color:#7d8781}.twsp-error{color:#a43e32}
+      .twsp-result-card,.twsp-history-entry,.twsp-preset-card,.twsp-prompt-card,.twsp-settings-section,.twsp-preset-toolbar{border:1px solid #e9e3da;border-radius:17px;background:#fff;box-shadow:0 6px 18px #58453608}
+      .twsp-result-card{padding:21px 23px;margin:16px 0}.twsp-result-card .twsp-raw{margin-top:12px}.twsp-history{display:grid;gap:10px}.twsp-history-entry{margin:0;overflow:hidden}.twsp-history-entry>summary{padding:17px 19px;min-height:66px;list-style:none;color:#303c35;font-weight:650}.twsp-history-entry>summary::-webkit-details-marker{display:none}.twsp-history-entry>summary:hover{background:#fcfaf6}.twsp-history-entry>p{margin:0;padding:0 19px;color:#8d948f;font-size:12px}.twsp-history-entry>.twsp-outline,.twsp-history-entry>.twsp-raw{margin:12px 19px 18px}
+      .twsp-outline{padding:15px 17px;border-radius:15px;background:#faf8f3}.twsp-outline-meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin-bottom:16px}.twsp-outline-meta-item{display:flex;align-items:center;gap:7px;color:#6c7770;font-size:12px}.twsp-outline-meta-item svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#a79a88}.twsp-outline-event-label{display:block;margin-bottom:7px;color:#a36b2d;font-size:12px;font-weight:700}.twsp-outline-event{margin:0;color:#303c35;font-size:16px;font-weight:500;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}.twsp-outline>details{margin-top:15px;border-top:1px solid #e8e2d7;padding-top:10px}.twsp-outline>details summary{color:#a9671c;font-size:12px;cursor:pointer}.twsp-outline .twsp-raw{margin:10px 0 0;color:#66716a;font-size:13px}
+      .twsp-input{border-color:#e6e4dd;border-radius:11px;color:#39413b;background:#faf9f6}.twsp-field{color:#757b75;font-size:13px;font-weight:600}.twsp-grid{gap:15px}.twsp-model-row>.twsp-button{min-height:48px}.twsp-actions{gap:10px}
+      .twsp-settings-section{padding:21px;margin:12px 0}.twsp-settings-section>summary{list-style:none;cursor:pointer;font-size:16px;font-weight:700}.twsp-settings-section>summary::-webkit-details-marker{display:none}.twsp-settings-section .twsp-grid{margin-top:19px}.twsp-settings-section .twsp-actions{justify-content:flex-start}
+      .twsp-advanced{margin:12px 0;padding:18px 21px;border:1px solid #e9e3da;border-radius:16px;background:#fff;color:#48534d}.twsp-advanced summary{cursor:pointer;font-weight:700}
+      .twsp-preset-toolbar{padding:18px 20px;border-bottom:1px solid #e9e3da}.twsp-preset-active{color:#7d8781;font-size:12px}.twsp-preset-active strong{color:#a9671c;font-weight:700}.twsp-preset-kind{border:0;border-radius:999px;background:#f9edda;color:#9a641f;font-size:11px}
+      .twsp-preset-card{min-height:65px;padding:9px 15px}.twsp-preset-card[data-selected="true"]{border-color:#cead80;background:#fffaf2}.twsp-preset-select{width:32px;height:32px;border-color:#d3c2ac}.twsp-preset-card[data-selected="true"] .twsp-preset-select{border-color:#a9671c;color:#fff;background:#a9671c}.twsp-preset-card-name{color:#303c35;font-size:14px;font-weight:650}.twsp-preset-compat{border-color:#e8d9c5;border-radius:13px;background:#fffbf4;color:#6a6257}.twsp-preset-compat strong{color:#a9671c}
+      .twsp-prompt-card{overflow:hidden}.twsp-prompt-card[data-enabled="false"]{opacity:.67}.twsp-prompt-head{min-height:62px;background:transparent}.twsp-prompt-title{color:#303c35;font-size:14px;letter-spacing:0}.twsp-prompt-title:hover{color:#a9671c}.twsp-prompt-role{border:0;border-radius:7px;background:#f6efe4;color:#93612d;font-size:11px}.twsp-prompt-role[data-role="user"],.twsp-prompt-role[data-role="assistant"]{border:0;color:#93612d}.twsp-prompt-size{color:#8d948f;font-size:11px}.twsp-prompt-icon{min-width:34px;min-height:38px;width:34px;height:38px;color:#737e75}.twsp-prompt-icon:hover{color:#a9671c}.twsp-prompt-drag{color:#9ca39e}.twsp-switch{min-width:46px;min-height:44px;width:46px;height:44px}.twsp-switch input{width:42px;height:24px;border-color:#d3d4ce;background:#d3d4ce}.twsp-switch input:before{width:18px;height:18px;margin:2px;background:#fff}.twsp-switch input:checked{border-color:#72a47b;background:#72a47b}.twsp-switch input:checked:before{transform:translateX(18px);background:#fff}
+      .twsp-prompt-editor{border-top-color:#ebe5dc;background:#fff}.twsp-prompt-editor .twsp-input{min-height:44px;border-color:#e6e4dd;color:#39413b;background:#faf9f6;font-size:14px}.twsp-prompt-content{min-height:160px}.twsp-prompt-hint,.twsp-prompt-flag{color:#7d8781;font-size:12px}.twsp-prompt-advanced-button{color:#a9671c;font-size:12px}.twsp-prompt-advanced-grid{border-top-color:#ebe5dc}.twsp-prompt-flag input{accent-color:#a9671c}.twsp-add-prompt{border-color:#cda978;color:#a9671c;font-size:13px}.twsp-preset-actions{border-top-color:#e9e3da}.twsp-delete-overlay{background:#1419198c}.twsp-delete-dialog{border:1px solid #e9e3da;border-radius:18px;overflow:hidden;color:#303c35;background:#fff;box-shadow:0 24px 65px #211b1530}.twsp-delete-dialog-header{border-bottom-color:#e9e3da;background:#faf8f3;color:#303c35;font-weight:700}
+      @media(max-width:720px){.twsp-head{padding:16px}.twsp-tabs{padding:0 12px 12px;overflow-x:auto;flex-wrap:nowrap}.twsp-panel{padding:21px 16px}.twsp-page-title{font-size:24px}.twsp-prompt-meta{width:auto;grid-template-columns:auto auto auto auto auto}.twsp-prompt-icon{min-width:34px}.twsp-preset-toolbar{align-items:flex-start}.twsp-dialog{border-radius:18px}}
+      @media(max-width:520px){.twsp-shell{padding:0}.twsp-page-heading{align-items:flex-start;flex-wrap:wrap}.twsp-result-card{padding:16px}.twsp-outline-meta{gap:8px 14px}.twsp-actions{justify-content:flex-start}.twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}}
     `;
     function element(tag, className = '', content = '') {
       const node = doc.createElement(tag);
@@ -1268,9 +1296,30 @@
         pencil: ['M3 17.25V21h3.75L19.81 7.94l-3.75-3.75L3 17.25Z', 'm14.06 6.19 3.75 3.75'],
         trash: ['M3 6h18', 'M8 6V4h8v2', 'm5 6 1 14h12l1-14', 'M10 10v6', 'M14 10v6'],
         download: ['M12 3v12', 'm7 10 5 5 5-5', 'M4 19h16'],
+        clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M12 7v5l3 2'],
+        pin: ['M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z', 'M12 10a2 2 0 1 0 0 .01Z'],
       }[name] ?? [];
       for (const d of paths) { const path = doc.createElementNS(ns, 'path'); path.setAttribute('d', d); svg.append(path); }
       node.replaceChildren(svg); return node;
+    }
+    function outlineCard(body) {
+      const raw = String(body ?? '');
+      const match = raw.match(/^\s*时间\s*[:：]\s*([\s\S]*?)\n\s*地点\s*[:：]\s*([\s\S]*?)\n\s*事件内容\s*[:：]\s*([\s\S]*)$/);
+      if (!match || !match[3].trim()) return element('pre', 'twsp-raw', raw);
+      const card = element('div', 'twsp-outline');
+      const meta = element('div', 'twsp-outline-meta');
+      for (const [name, value, symbol] of [['时间', match[1], 'clock'], ['地点', match[2], 'pin']]) {
+        const item = element('div', 'twsp-outline-meta-item');
+        item.append(icon(element('span'), symbol), element('span', '', value.trim() || '未注明'));
+        item.setAttribute('aria-label', `${name}：${value.trim() || '未注明'}`);
+        meta.append(item);
+      }
+      const label = element('span', 'twsp-outline-event-label', '事件内容');
+      const event = element('p', 'twsp-outline-event', match[3].trim());
+      const original = element('details');
+      original.append(element('summary', '', '查看原文'), element('pre', 'twsp-raw', raw));
+      card.append(meta, label, event, original);
+      return card;
     }
     function field(label, name, type = 'text') {
       const wrapper = element('label', 'twsp-field');
@@ -1284,11 +1333,13 @@
     const header = element('header', 'twsp-head');
     const title = element('h2', 'twsp-title', options.version ? `剧情规划器 ${options.version}` : '剧情规划器');
     title.id = 'tw-story-planner-title-v1';
+    const brand = element('div', 'twsp-brand');
+    brand.append(title, element('small', 'twsp-head-subtitle', '让故事的下一步更清晰'));
     const closeButton = button('×', 'close', 'twsp-close');
     closeButton.setAttribute('aria-label', '关闭剧情规划器');
     const toggleEnabledButton = button('开启规划器', 'toggleEnabled', 'twsp-button twsp-activation');
     toggleEnabledButton.setAttribute('aria-label', '开启剧情规划器');
-    header.append(title, toggleEnabledButton, closeButton);
+    header.append(brand, toggleEnabledButton, closeButton);
     const tabs = element('div', 'twsp-tabs');
     tabs.setAttribute('role', 'tablist');
     const resultTab = button('规划结果', 'tab-result', 'twsp-tab');
@@ -1302,25 +1353,33 @@
     resultPanel.setAttribute('role', 'tabpanel');
     resultPanel.id = 'twsp-result-panel';
     resultTab.setAttribute('aria-controls', resultPanel.id);
+    const resultHeading = element('div', 'twsp-page-heading');
+    const resultHeadingText = element('div');
+    resultHeadingText.append(element('h3', 'twsp-page-title', '规划结果'), element('p', 'twsp-page-description', '当前细纲与本聊天的规划记录'));
     const statusLine = element('div', 'twsp-statusline');
     const statusBadge = mark(element('span', 'twsp-badge'), 'view', 'status');
     statusBadge.setAttribute('role', 'status');
     const updatedAt = mark(element('span'), 'view', 'updatedAt');
     const activationHint = mark(element('span', 'twsp-hint'), 'view', 'activationHint');
     statusLine.append(statusBadge, updatedAt, activationHint);
-    const outlineBody = mark(element('pre', 'twsp-raw'), 'view', 'outlineBody');
+    const outlineBody = mark(element('div', 'twsp-result-card'), 'view', 'outlineBody');
     const historyList = mark(element('div', 'twsp-history'), 'view', 'outlineHistory');
     const taskStatus = mark(element('p', 'twsp-hint'), 'view', 'planningTask');
     let historyStamp = null;
     const resultError = mark(element('p', 'twsp-error'), 'view', 'error');
     resultError.setAttribute('role', 'alert');
     const runButton = button('立即规划', 'run', 'twsp-button twsp-button--primary');
+    resultHeading.append(resultHeadingText, runButton);
     const retrySaveButton = button('重试保存细纲', 'retrySave');
-    resultPanel.append(taskStatus, historyList, outlineBody, resultError, retrySaveButton);
+    resultPanel.append(resultHeading, statusLine, taskStatus, historyList, outlineBody, resultError, retrySaveButton);
     const settingsPanel = element('section', 'twsp-panel');
     settingsPanel.setAttribute('role', 'tabpanel');
     settingsPanel.id = 'twsp-settings-panel';
     settingsTab.setAttribute('aria-controls', settingsPanel.id);
+    const settingsHeading = element('div', 'twsp-page-heading');
+    const settingsHeadingText = element('div');
+    settingsHeadingText.append(element('h3', 'twsp-page-title', '设置'), element('p', 'twsp-page-description', '连接模型并调整规划方式'));
+    settingsHeading.append(settingsHeadingText, element('span', 'twsp-version', options.version ? `v${options.version}` : ''));
     const grid = element('div', 'twsp-grid');
     const apiurl = field('API 地址', 'apiurl', 'url');
     apiurl.wrapper.className += ' twsp-wide';
@@ -1366,11 +1425,17 @@
     const saveButton = button('保存配置', 'save', 'twsp-button twsp-button--primary');
     advancedActions.append(checkButton, clearKeyButton);
     advanced.append(advancedActions);
-    settingsActions.append(testButton, toolProbeButton, saveButton, runButton);
-    settingsPanel.append(statusLine, grid, advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), checkStatus, settingsActions);
+    settingsActions.append(testButton, toolProbeButton, saveButton);
+    const connectionSection = element('section', 'twsp-settings-section');
+    connectionSection.append(element('h4', '', '连接配置'), grid);
+    settingsPanel.append(settingsHeading, connectionSection, advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), checkStatus, settingsActions);
     const presetsPanel = element('section', 'twsp-panel');
     presetsPanel.id = 'twsp-presets-panel'; presetsPanel.setAttribute('role', 'tabpanel');
     presetsTab.setAttribute('aria-controls', presetsPanel.id);
+    const presetsHeading = element('div', 'twsp-page-heading');
+    const presetsHeadingText = element('div');
+    presetsHeadingText.append(element('h3', 'twsp-page-title', '预设'), element('p', 'twsp-page-description', '整理规划时使用的提示词'));
+    presetsHeading.append(presetsHeadingText);
     const presetSelect = mark(element('select', 'twsp-input'), 'field', 'presetSelect');
     presetSelect.hidden = true;
     const presetName = field('预设名称', 'presetName');
@@ -1408,7 +1473,7 @@
     presetSelectLabel.hidden = true;
     const importLabel = element('label', 'twsp-preset-import');
     importLabel.append(element('span', '', '导入 Chat Completion 预设 JSON'), importInput);
-    presetsPanel.append(element('p', 'twsp-hint', '独立预设；温度与最大 token 以设置页为准。'), presetToolbar, presetSelectLabel, importLabel, presetCards, presetName.wrapper, presetCompatibility, presetRows, addPromptButton, presetActions, presetStatus, presetPreview);
+    presetsPanel.append(presetsHeading, element('p', 'twsp-hint', '独立预设；温度与最大 token 以设置页为准。'), presetToolbar, presetSelectLabel, importLabel, presetCards, presetName.wrapper, presetCompatibility, presetRows, addPromptButton, presetActions, presetStatus, presetPreview);
     shell.append(header, tabs, resultPanel, settingsPanel, presetsPanel);
     root.append(style, shell);
     doc.body.append(root);
@@ -1698,9 +1763,9 @@
       statusBadge.dataset.status = view.status;
       activationHint.textContent = view.activationHint ?? '';
       updatedAt.textContent = view.updatedAt ? `更新：${view.updatedAt}` : '尚无规划记录';
-      outlineBody.textContent = view.outlineBody;
+      outlineBody.replaceChildren(outlineCard(view.outlineBody));
       const history = view.outlineHistory ?? [];
-      outlineBody.hidden = history.length > 0;
+      outlineBody.hidden = history.length > 0 || !view.outlineBody;
       const nextStamp = JSON.stringify(history);
       if (nextStamp !== historyStamp) {
         const expanded = new Set(Array.from(historyList.children).filter(item => item.open).map(item => item.dataset.recordId));
@@ -1713,7 +1778,7 @@
           const used = record.usedMessageId == null ? '使用楼层待确认' : `用于 #${record.usedMessageId}`;
           item.append(element('summary', '', `细纲 ${record.sequence} · ${source} → ${used} · ${labels[record.status] ?? record.status}`),
             element('p', 'twsp-hint', `${record.purpose === 'initial' ? '初始规划' : record.purpose === 'legacy' ? '旧版本记录' : '下一轮规划'} · ${record.createdAt ?? ''}${record.invalidReason ? ` · ${record.invalidReason}` : ''}`),
-            element('pre', 'twsp-raw', record.body));
+            outlineCard(record.body));
           return item;
         });
         historyList.replaceChildren(...entries);

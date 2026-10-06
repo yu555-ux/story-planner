@@ -7,9 +7,9 @@ const require = createRequire(import.meta.url);
 const engine = require('./planner.js');
 const adapter = require('./runtime-adapter.js');
 
-test('0.0.10 release version matches manifest, adapter and panel title', () => {
+test('0.1.1 release version matches manifest, adapter and panel title', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.0.10');
+  assert.equal(manifest.version, '0.1.1');
   assert.equal(adapter.VERSION, manifest.version);
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);
@@ -22,7 +22,7 @@ test('0.0.10 release version matches manifest, adapter and panel title', () => {
   const nodes = [...document.body.children];
   let title;
   while (nodes.length) { const node = nodes.shift(); if (node.className === 'twsp-title') title = node; nodes.push(...node.children); }
-  assert.equal(title?.textContent, '剧情规划器 0.0.10');
+  assert.equal(title?.textContent, '剧情规划器 0.1.1');
   panel.destroy();
 });
 
@@ -101,6 +101,26 @@ test('result page renders ordered floor history as safe outline text and exposes
   assert.equal(list.children[0].children.at(-1).textContent, '<script>保留原文</script>');
   assert.match(list.children[1].children[0].textContent, /使用楼层待确认/);
   assert.equal(nodes.find(node => node.dataset.twField === 'retryCount').value, '3');
+  panel.destroy();
+});
+
+test('outline card gives event content priority and uses SVG icons for time and place', () => {
+  const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document), body: null };
+  document.body = new Element('body', document);
+  const body = '时间: 雨夜\n地点: 林家旧宅\n事件内容: 林澈发现遗失的信件。';
+  const panel = engine.createPlannerPanel({
+    document,
+    getViewModel: () => ({ config: { enabled: true }, status: 'ready', statusLabel: '已完成', configErrors: {},
+      outlineHistory: [{ id: 'a', sequence: 1, status: 'ready', body }] }),
+    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
+    setInterval: () => 1, clearInterval() {},
+  });
+  panel.open();
+  const nodes = [...document.body.children];
+  for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
+  assert.equal(nodes.find(node => node.className === 'twsp-outline-event')?.textContent, '林澈发现遗失的信件。');
+  assert.equal(nodes.filter(node => node.className === 'twsp-outline-meta-item').length, 2);
+  assert.equal(nodes.filter(node => node.tagName === 'svg' && node.attributes['aria-hidden'] === 'true').length >= 2, true);
   panel.destroy();
 });
 
