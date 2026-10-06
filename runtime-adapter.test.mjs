@@ -175,6 +175,62 @@ test('native host resolves the current chat metadata again after a chat switch',
   assert.equal(first.chatMetadata.extensions, undefined);
 });
 
+test('chat display uses the Tavern file name and saves a planner-only record name per chat', async () => {
+  const first = contextFixture().context;
+  first.chatId = '做卡 - 2026-10-06@16h55m53s';
+  first.characters[0].name = '做卡';
+  let saves = 0;
+  first.saveMetadata = async () => { saves++; };
+  first.renameChat = () => { throw new Error('The Tavern file must not be renamed'); };
+  const second = contextFixture().context;
+  second.chatId = '做卡 - 第二份存档';
+  second.characters[0].name = '做卡';
+  let active = first;
+  const host = createNativeHost(first, { window: { SillyTavern: { getContext: () => active } }, document: null });
+
+  assert.equal(host.getCurrentChatDisplay().label, first.chatId);
+  assert.equal(host.getCurrentChatDisplay().recordName, '2026-10-06@16h55m53s');
+  const identity = host.getCurrentChatDisplay().identity;
+  await host.setCurrentChatRecordName('第一幕', identity);
+  assert.equal(host.getCurrentChatDisplay().label, '做卡 - 第一幕');
+  assert.equal(first.chatId, '做卡 - 2026-10-06@16h55m53s');
+  assert.equal(first.chatMetadata.extensions['tw-story-planner-v1'].chatRecordName, '第一幕');
+  assert.equal(saves, 1);
+
+  active = second;
+  assert.equal(host.getCurrentChatDisplay().label, second.chatId);
+  await assert.rejects(host.setCurrentChatRecordName('错写', identity), /聊天已切换/);
+  assert.equal(second.chatMetadata.extensions, undefined);
+  active = first;
+  await host.setCurrentChatRecordName('', identity);
+  assert.equal(host.getCurrentChatDisplay().label, first.chatId);
+  assert.equal(first.chatMetadata.extensions['tw-story-planner-v1'].chatRecordName, undefined);
+  host.destroy();
+});
+
+test('a nonstandard Tavern chat name stays literal until its planner record name is customized', async () => {
+  const { context } = contextFixture();
+  context.chatId = '旧存档';
+  const host = createNativeHost(context, { window: { SillyTavern: { getContext: () => context } }, document: null });
+  assert.equal(host.getCurrentChatDisplay().label, '旧存档');
+  await host.setCurrentChatRecordName('第一幕', host.getCurrentChatDisplay().identity);
+  assert.equal(host.getCurrentChatDisplay().label, '角色 - 第一幕');
+  assert.equal(context.chatId, '旧存档');
+  host.destroy();
+});
+
+test('planner-only chat name keeps outline metadata and rolls back after a failed save', async () => {
+  const { context } = contextFixture();
+  context.chatId = '角色 - 原存档';
+  context.chatMetadata = { extensions: { 'tw-story-planner-v1': { __tw_story_planner_v1: { outline: '原细纲' } } } };
+  context.saveMetadata = async () => { throw new Error('保存失败'); };
+  const host = createNativeHost(context, { window: { SillyTavern: { getContext: () => context } }, document: null });
+  await assert.rejects(host.setCurrentChatRecordName('新名称', host.getCurrentChatDisplay().identity), /保存失败/);
+  assert.equal(host.getCurrentChatDisplay().label, '角色 - 原存档');
+  assert.deepEqual(context.chatMetadata.extensions['tw-story-planner-v1'].__tw_story_planner_v1, { outline: '原细纲' });
+  host.destroy();
+});
+
 test('group chat rename and copy keep metadata scoped to the selected chat', () => {
   const first = contextFixture().context;
   first.groupId = 'group-1';

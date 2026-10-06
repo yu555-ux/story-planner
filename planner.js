@@ -1282,6 +1282,9 @@
       .twsp-brand-mark{display:grid;place-items:center;flex:none;width:54px;height:54px;border-radius:18px;background:#eedbb8;color:#8d5b21}
       .twsp-brand-mark svg{width:26px;height:26px;fill:currentColor;stroke:none}
       .twsp-title{font-size:23px;line-height:1.25;font-weight:700}.twsp-head-subtitle{max-width:100%;margin-top:2px;overflow-wrap:anywhere;color:var(--twsp-muted);font-size:13px}
+      .twsp-head-subtitle{display:flex;align-items:center;flex-wrap:wrap;gap:0}.twsp-chat-name{padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;overflow-wrap:anywhere;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+      .twsp-chat-name:hover{color:var(--twsp-brand)}.twsp-chat-name:focus-visible,.twsp-chat-editor button:focus-visible{outline:2px solid var(--twsp-brand);outline-offset:2px}.twsp-chat-editor{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px}.twsp-chat-editor[hidden],.twsp-chat-name[hidden],.twsp-chat-fallback[hidden]{display:none}
+      .twsp-chat-editor input{box-sizing:border-box;max-width:min(300px,65vw);min-height:30px;padding:4px 7px;border:1px solid var(--twsp-border);border-radius:6px;background:var(--twsp-soft);color:var(--twsp-ink);font:inherit}.twsp-chat-editor button{padding:3px 6px;border:0;background:transparent;color:var(--twsp-brand);font:inherit;cursor:pointer}.twsp-chat-error{color:#a43e32}
       .twsp-activation{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;min-height:42px;border-color:var(--twsp-border);font-size:13px;white-space:nowrap}
       .twsp-activation[data-enabled="true"]{border-color:#dfe9df;background:var(--twsp-green);color:var(--twsp-green-ink)}
       .twsp-activation[data-enabled="true"]:before{content:"";width:8px;height:8px;border-radius:50%;background:#5d9b68}
@@ -1397,7 +1400,7 @@
         .twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}
       }
       @media(max-width:520px){
-        .twsp-head{gap:8px}.twsp-head-subtitle{display:none}.twsp-brand{gap:9px}.twsp-brand-mark{width:40px;height:40px}
+        .twsp-head{gap:8px}.twsp-head-subtitle{font-size:11px}.twsp-brand{gap:9px}.twsp-brand-mark{width:40px;height:40px}
         .twsp-activation{order:3;margin-left:0;min-height:38px;padding:7px 10px;font-size:12px}.twsp-close{margin-left:auto}
         .twsp-tabs{gap:2px;overflow-x:hidden;justify-content:space-between}.twsp-tab{gap:5px;padding:8px;font-size:13px}.twsp-tab .twsp-inline-icon svg{width:16px;height:16px}
         .twsp-page-heading .twsp-button--primary{width:100%}.twsp-page-heading{align-items:flex-start}
@@ -1495,7 +1498,22 @@
     title.id = 'tw-story-planner-title-v1';
     const brand = element('div', 'twsp-brand');
     const brandText = element('div');
-    const chatLabel = element('small', 'twsp-head-subtitle', '未选择角色卡或聊天存档');
+    const chatLabel = element('div', 'twsp-head-subtitle');
+    const chatPrefix = element('span', 'twsp-chat-prefix');
+    const chatNameButton = button('', 'chatRecordName', 'twsp-chat-name');
+    const chatFallback = element('span', 'twsp-chat-fallback', '未选择角色卡或聊天存档');
+    const chatEditor = element('span', 'twsp-chat-editor');
+    chatEditor.hidden = true;
+    const chatNameInput = mark(element('input'), 'field', 'chatRecordName');
+    chatNameInput.type = 'text';
+    chatNameInput.maxLength = 120;
+    chatNameInput.setAttribute('aria-label', '规划器中的聊天记录名');
+    const saveChatNameButton = button('保存', 'saveChatRecordName');
+    const cancelChatNameButton = button('取消', 'cancelChatRecordName');
+    const resetChatNameButton = button('恢复原名', 'resetChatRecordName');
+    const chatNameError = element('span', 'twsp-chat-error');
+    chatEditor.append(chatNameInput, saveChatNameButton, cancelChatNameButton, resetChatNameButton, chatNameError);
+    chatLabel.append(chatPrefix, chatNameButton, chatFallback, chatEditor);
     brandText.append(title, chatLabel);
     brand.append(inlineIcon('sparkle', 'twsp-brand-mark'), brandText);
     const closeButton = button('×', 'close', 'twsp-close');
@@ -1973,9 +1991,25 @@
         timeoutSeconds: timeout.input.value, retryCount: retryCount.input.value, maxTokens: maxTokens.input.value,
         temperature: temperature.input.value };
     }
+    let editingChatIdentity = null;
+    let savingChatName = false;
+    let chatEditError = '';
     function render(syncFields = false) {
       const view = options.getViewModel();
-      chatLabel.textContent = view.chatLabel || '未选择角色卡或聊天存档';
+      const display = view.chatDisplay;
+      if (editingChatIdentity && editingChatIdentity !== display?.identity) editingChatIdentity = null;
+      const editingChat = Boolean(editingChatIdentity);
+      chatPrefix.textContent = display?.prefix ?? '';
+      chatNameButton.textContent = display?.recordName ?? '';
+      chatNameButton.setAttribute('aria-label', `修改规划器中的聊天记录名：${display?.recordName ?? ''}`);
+      chatNameButton.hidden = !display?.editable || editingChat;
+      chatFallback.textContent = display?.label ?? view.chatLabel ?? '未选择角色卡或聊天存档';
+      chatFallback.hidden = Boolean(display?.editable);
+      chatEditor.hidden = !editingChat;
+      resetChatNameButton.hidden = !display?.customName;
+      saveChatNameButton.disabled = savingChatName;
+      resetChatNameButton.disabled = savingChatName;
+      chatNameError.textContent = chatEditError;
       toggleEnabledButton.textContent = view.config.enabled ? '规划器已开启' : '开启规划器';
       toggleEnabledButton.dataset.enabled = String(view.config.enabled);
       toggleEnabledButton.setAttribute('aria-pressed', String(view.config.enabled));
@@ -2070,6 +2104,54 @@
       closeButton.focus?.();
     }
     function destroy() { stopRefresh(); if (root.open && typeof root.close === 'function') root.close(); root.remove(); }
+    chatNameButton.addEventListener('click', () => {
+      const display = options.getViewModel().chatDisplay;
+      if (!display?.editable) return;
+      editingChatIdentity = display.identity;
+      chatEditError = '';
+      chatNameInput.value = display.recordName;
+      render(false);
+      chatNameInput.focus?.();
+      chatNameInput.select?.();
+    });
+    cancelChatNameButton.addEventListener('click', () => {
+      if (savingChatName) return;
+      editingChatIdentity = null;
+      chatEditError = '';
+      render(false);
+    });
+    async function submitChatName(restore = false) {
+      if (savingChatName || !editingChatIdentity) return;
+      const name = restore ? '' : String(chatNameInput.value ?? '').trim();
+      if (!restore && !name) {
+        chatEditError = '请输入聊天记录名，或点“恢复原名”。';
+        render(false);
+        return;
+      }
+      if (options.getViewModel().chatDisplay?.identity !== editingChatIdentity) {
+        editingChatIdentity = null;
+        render(false);
+        return;
+      }
+      savingChatName = true;
+      chatEditError = '';
+      render(false);
+      try {
+        await options.setChatRecordName(name, editingChatIdentity);
+        editingChatIdentity = null;
+      } catch (error) {
+        chatEditError = error?.message || '规划器名称保存失败。';
+      } finally {
+        savingChatName = false;
+        render(false);
+      }
+    }
+    saveChatNameButton.addEventListener('click', () => submitChatName());
+    resetChatNameButton.addEventListener('click', () => submitChatName(true));
+    chatNameInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); void submitChatName(); }
+      if (event.key === 'Escape') { event.preventDefault(); cancelChatNameButton.click(); }
+    });
     resultTab.addEventListener('click', () => showTab('result'));
     settingsTab.addEventListener('click', () => showTab('settings'));
     presetsTab.addEventListener('click', () => showTab('presets'));
@@ -2792,7 +2874,13 @@
     function getPanelViewModel() {
       const presetReady = hasEffectivePlannerPrompt(activePreset());
       return { ...buildPanelViewModel(config, currentPlanningState(), scheduler.getStatus(), presetReady),
-        presetReady, chatLabel: globals.getCurrentChatLabel?.() ?? '未选择角色卡或聊天存档' };
+        presetReady, chatDisplay: globals.getCurrentChatDisplay?.(),
+        chatLabel: globals.getCurrentChatLabel?.() ?? '未选择角色卡或聊天存档' };
+    }
+
+    function setChatRecordName(name, expectedIdentity) {
+      if (typeof globals.setCurrentChatRecordName !== 'function') throw new Error('当前酒馆无法保存规划器聊天名称');
+      return globals.setCurrentChatRecordName(name, expectedIdentity);
     }
 
     let testGenerationId = null;
@@ -2983,6 +3071,7 @@
           getPresetState: () => structuredClone(presetState),
           savePresetState, checkPreset, previewPreset, checkPreviewFresh,
           saveConfig: savePanelConfig,
+          setChatRecordName,
           persistConfig: () => typeof globals.persistVariables === 'function'
             ? globals.persistVariables({ type: 'script' }) : Promise.resolve({ type: 'script', confirmed: false }),
           retryPersist: lifecycle.retryPersistence,

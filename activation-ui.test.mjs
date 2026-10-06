@@ -9,7 +9,7 @@ const adapter = require('./runtime-adapter.js');
 
 test('release version matches manifest, adapter and settings badge', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.7');
+  assert.equal(manifest.version, '0.1.8');
   assert.equal(adapter.VERSION, manifest.version);
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);
@@ -25,6 +25,43 @@ test('release version matches manifest, adapter and settings badge', () => {
   while (nodes.length) { const node = nodes.shift(); if (node.className === 'twsp-title') title = node; if (node.className === 'twsp-version') badge = node; nodes.push(...node.children); }
   assert.equal(title?.textContent, '剧情规划器');
   assert.equal(badge?.textContent, `v${manifest.version}`);
+  panel.destroy();
+});
+
+test('header edits only the chat record label and can restore the Tavern name', async () => {
+  const document = { createElement: tag => new Element(tag, document), body: null };
+  document.body = new Element('body', document);
+  let recordName = '2026-10-06@16h55m53s';
+  let customName = null;
+  const saved = [];
+  const panel = engine.createPlannerPanel({
+    document,
+    getViewModel: () => ({ config: { enabled: false }, status: 'disabled', configErrors: {},
+      chatDisplay: { identity: 'chat-1', prefix: '做卡 - ', recordName,
+        label: `做卡 - ${recordName}`, editable: true, customName } }),
+    setChatRecordName: async (name, identity) => {
+      saved.push([name, identity]);
+      customName = name || null;
+      recordName = customName || '2026-10-06@16h55m53s';
+    },
+    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
+    setInterval: () => 1, clearInterval() {},
+  });
+  panel.open();
+  const root = document.body.children[0];
+  const name = root.querySelector('[data-tw-action="chatRecordName"]');
+  assert.equal(name.textContent, '2026-10-06@16h55m53s');
+  name.click();
+  const input = root.querySelector('[data-tw-field="chatRecordName"]');
+  assert.equal(input.value, '2026-10-06@16h55m53s');
+  input.value = '第一幕';
+  await root.querySelector('[data-tw-action="saveChatRecordName"]').click();
+  assert.deepEqual(saved, [['第一幕', 'chat-1']]);
+  assert.equal(name.textContent, '第一幕');
+  name.click();
+  await root.querySelector('[data-tw-action="resetChatRecordName"]').click();
+  assert.deepEqual(saved.at(-1), ['', 'chat-1']);
+  assert.equal(name.textContent, '2026-10-06@16h55m53s');
   panel.destroy();
 });
 
@@ -44,12 +81,12 @@ class Element {
   close() { this.open = false; }
   remove() { this.parentNode.children = this.parentNode.children.filter(child => child !== this); }
   querySelector(selector) {
-    const match = selector.match(/^\[data-tw-action="([^"]+)"\]$/);
+    const match = selector.match(/^\[data-tw-(action|field)="([^"]+)"\]$/);
     if (!match) return null;
     const queue = [...this.children];
     while (queue.length) {
       const item = queue.shift();
-      if (item.dataset.twAction === match[1]) return item;
+      if (item.dataset[match[1] === 'action' ? 'twAction' : 'twField'] === match[2]) return item;
       queue.push(...item.children);
     }
     return null;

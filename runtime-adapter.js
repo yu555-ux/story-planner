@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);
@@ -228,6 +228,46 @@
       liveContext().saveMetadataDebounced?.();
     }
 
+    function currentChatDisplay() {
+      const current = liveContext();
+      const character = current.characters?.[current.characterId];
+      const characterName = typeof character?.name === 'string' ? character.name.trim() : '';
+      const chatName = typeof current.chatId === 'string' ? current.chatId.trim() : '';
+      const nativePrefix = characterName && chatName.startsWith(`${characterName} - `) ? `${characterName} - ` : '';
+      const savedName = current.chatMetadata?.extensions?.[EXTENSION_ID]?.chatRecordName;
+      const customName = typeof savedName === 'string' && savedName.trim() ? savedName.trim() : null;
+      const prefix = customName && characterName ? `${characterName} - ` : nativePrefix;
+      return {
+        identity: JSON.stringify([current.characterId ?? null, current.groupId ?? null, chatName]),
+        label: chatName ? (customName ? `${prefix}${customName}` : chatName) : '未选择角色卡或聊天存档',
+        prefix,
+        recordName: customName ?? chatName.slice(nativePrefix.length),
+        customName,
+        editable: Boolean(chatName),
+      };
+    }
+
+    async function setCurrentChatRecordName(value, expectedIdentity) {
+      const current = liveContext();
+      if (!currentChatDisplay().editable || currentChatDisplay().identity !== expectedIdentity) throw new Error('聊天已切换，请重新打开名称编辑');
+      const metadata = current.chatMetadata;
+      if (!metadata || typeof metadata !== 'object' || typeof current.saveMetadata !== 'function') throw new Error('当前聊天无法保存规划器名称');
+      const name = String(value ?? '').trim();
+      if (name.length > 120) throw new Error('聊天记录名不能超过 120 个字符');
+      metadata.extensions ??= {};
+      metadata.extensions[EXTENSION_ID] ??= {};
+      const names = metadata.extensions[EXTENSION_ID];
+      const previous = names.chatRecordName;
+      if (name) names.chatRecordName = name;
+      else delete names.chatRecordName;
+      try { await current.saveMetadata.call(current); }
+      catch (error) {
+        if (previous === undefined) delete names.chatRecordName;
+        else names.chatRecordName = previous;
+        throw error;
+      }
+    }
+
     function mountButton() {
       if (button || !document?.createElement) return;
       const target = document.querySelector?.('#extensionsMenu');
@@ -330,12 +370,10 @@
         return type === 'chat' ? chatState() : clone(nativeSettings());
       },
       getCurrentChatLabel() {
-        const current = liveContext();
-        const character = current.characters?.[current.characterId];
-        const characterName = typeof character?.name === 'string' ? character.name.trim() : '';
-        const chatName = typeof current.chatId === 'string' ? current.chatId.trim() : '';
-        return characterName && chatName ? `${characterName}·${chatName}` : '未选择角色卡或聊天存档';
+        return currentChatDisplay().label;
       },
+      getCurrentChatDisplay: currentChatDisplay,
+      setCurrentChatRecordName,
       updateVariablesWith(updater, { type } = {}) {
         if (type === 'chat') saveChatState(updater(chatState()));
         else {
