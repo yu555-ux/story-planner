@@ -1302,6 +1302,7 @@
       .twsp-button--primary:hover{background:var(--twsp-brand-hover)}
       .twsp-button:disabled{opacity:.48}.twsp-field{gap:7px;color:#6b7871;font-size:13px;font-weight:650}
       .twsp-field .twsp-hint{font-weight:400}.twsp-input{min-height:48px;border-color:#e5e1da;background:var(--twsp-soft);color:var(--twsp-ink);font-size:15px}
+      .twsp-input[data-tw-field="key"]::placeholder{color:#68756e;opacity:1;letter-spacing:.12em}
       .twsp-input:focus{border-color:#bd8a4f}.twsp-raw{color:#536058;font-size:14px;line-height:1.7}
       .twsp-hint{color:var(--twsp-muted)}.twsp-error{color:#a43e32}
 
@@ -1330,16 +1331,6 @@
       .twsp-history-chevron{color:#64716a}.twsp-history-entry[open] .twsp-history-chevron{transform:rotate(180deg)}
       .twsp-history-entry>p{padding:0 19px}.twsp-history-entry>.twsp-outline,.twsp-history-entry>.twsp-raw{margin:12px 19px 20px}
 
-      .twsp-settings-status{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 28px;margin-bottom:16px;border:1px solid var(--twsp-border);border-radius:23px;background:var(--twsp-surface)}
-      .twsp-settings-status>div{display:grid;gap:5px}.twsp-settings-status strong{font-size:16px;font-weight:650}
-      .twsp-card-caption{color:var(--twsp-faint);font-size:12px;font-weight:500}
-      .twsp-settings-switch{position:relative;display:inline-flex;align-items:center;flex:none;min-width:54px;min-height:44px;cursor:pointer}
-      .twsp-settings-switch input{position:absolute;opacity:0;width:54px;height:36px;margin:0;cursor:pointer}
-      .twsp-settings-switch-track{display:block;width:52px;height:31px;padding:3px;border-radius:999px;background:#c7cac5;transition:background .18s ease}
-      .twsp-settings-switch-track:before{content:"";display:block;width:25px;height:25px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0002;transition:transform .18s ease}
-      .twsp-settings-switch input:checked+.twsp-settings-switch-track{background:#68a074}
-      .twsp-settings-switch input:checked+.twsp-settings-switch-track:before{transform:translateX(21px)}
-      .twsp-settings-switch input:focus-visible+.twsp-settings-switch-track{outline:2px solid var(--twsp-brand);outline-offset:3px}
       .twsp-settings-section{padding:0;margin:12px 0;border-radius:20px;box-shadow:none}
       .twsp-settings-section>summary{display:flex;justify-content:space-between;align-items:center;min-height:72px;padding:18px 24px;font-size:16px;cursor:pointer}
       .twsp-settings-section-title{display:inline-flex;align-items:center;gap:12px}.twsp-settings-section-title .twsp-inline-icon{color:#b27a3b}
@@ -1413,7 +1404,7 @@
         .twsp-page-heading .twsp-button--primary{width:100%}.twsp-page-heading{align-items:flex-start}
         .twsp-result-card{padding:20px}.twsp-result-top{align-items:flex-start;flex-wrap:wrap}.twsp-outline-event-box{padding:16px}
         .twsp-history-main small{white-space:normal}.twsp-history-state{display:none}
-        .twsp-settings-status{padding:18px}.twsp-settings-section>summary{padding:16px 18px}
+        .twsp-settings-section>summary{padding:16px 18px}
         .twsp-settings-section>.twsp-grid{padding:4px 18px 20px}.twsp-settings-section .twsp-params-grid{grid-template-columns:1fr}
         .twsp-preset-card{align-items:flex-start;flex-wrap:wrap}.twsp-preset-card-controls{width:100%;justify-content:flex-end}
         .twsp-prompt-subtitle{gap:5px;flex-wrap:wrap}.twsp-prompt-meta{gap:2px}.twsp-prompt-drag{width:20px}
@@ -1556,15 +1547,6 @@
     const settingsHeadingText = element('div');
     settingsHeadingText.append(element('span', 'twsp-eyebrow', 'PREFERENCES'), element('h3', 'twsp-page-title', '设置'), element('p', 'twsp-page-description', '连接模型并调整规划方式'));
     settingsHeading.append(settingsHeadingText, element('span', 'twsp-version', options.version ? `v${options.version}` : ''));
-    const settingsStatus = element('div', 'twsp-settings-status');
-    const settingsStatusText = element('div');
-    settingsStatusText.append(element('span', 'twsp-card-caption', '规划器状态'), element('strong', '', '让规划器在回复前准备细纲'));
-    const settingsSwitch = element('label', 'twsp-settings-switch');
-    const settingsEnabledInput = mark(element('input'), 'field', 'settingsEnabled');
-    settingsEnabledInput.type = 'checkbox';
-    settingsEnabledInput.setAttribute('aria-label', '开启剧情规划器');
-    settingsSwitch.append(settingsEnabledInput, element('span', 'twsp-settings-switch-track'));
-    settingsStatus.append(settingsStatusText, settingsSwitch);
     const grid = element('div', 'twsp-grid');
     const apiurl = field('API 地址', 'apiurl', 'url');
     apiurl.wrapper.className += ' twsp-wide';
@@ -1630,7 +1612,7 @@
     const diagnosticActions = element('div', 'twsp-actions');
     diagnosticActions.append(testButton, toolProbeButton);
     diagnosticsSection.append(advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), diagnosticActions);
-    settingsPanel.append(settingsHeading, settingsStatus, connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
+    settingsPanel.append(settingsHeading, connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
     const presetsPanel = element('section', 'twsp-panel');
     presetsPanel.id = 'twsp-presets-panel'; presetsPanel.setAttribute('role', 'tabpanel');
     presetsTab.setAttribute('aria-controls', presetsPanel.id);
@@ -1991,7 +1973,6 @@
       toggleEnabledButton.dataset.enabled = String(view.config.enabled);
       toggleEnabledButton.setAttribute('aria-pressed', String(view.config.enabled));
       toggleEnabledButton.setAttribute('aria-label', view.config.enabled ? '关闭剧情规划器' : '开启剧情规划器');
-      settingsEnabledInput.checked = view.config.enabled;
       statusBadge.textContent = view.statusLabel;
       statusBadge.dataset.status = view.status;
       activationHint.textContent = view.activationHint ?? '';
@@ -2045,7 +2026,8 @@
       retrySaveButton.hidden = !view.persistenceError;
       retrySaveButton.disabled = !view.persistenceError;
       runButton.disabled = Object.keys(view.configErrors).length > 0 || ['running', 'retrying'].includes(view.status) || view.presetReady === false;
-      keyStatus.textContent = view.config.key ? '已填写密钥；输入框不会回填。保存结果见下方提示。' : '尚未填写密钥；无密钥接口可留空。';
+      keyStatus.textContent = view.config.key ? '已保存密钥；圆点仅作遮罩提示，留空保存会继续使用该密钥。' : '尚未填写密钥；无密钥接口可留空。';
+      key.input.placeholder = view.config.key ? '••••••••••••' : '请输入 API 密钥';
       if (activeTab === 'presets' && previewStamp && previewContextHash && Date.now() - lastPreviewCheck > 5000) {
         lastPreviewCheck = Date.now(); const stamp = previewStamp;
         Promise.resolve(options.checkPreviewFresh?.(previewContextHash)).then(current => { if (stamp === previewStamp && current === false) invalidatePreview(); }).catch(() => invalidatePreview());
@@ -2304,7 +2286,6 @@
       render(false);
       await confirmConfigSave();
     });
-    settingsEnabledInput.addEventListener('change', () => toggleEnabledButton.click());
     retrySaveButton.addEventListener('click', async () => {
       retrySaveButton.disabled = true;
       try { await options.retryPersist?.(); }

@@ -79,11 +79,8 @@ test('prominent activation button persists immediately and logs each state', () 
   assert.equal(config.enabled, false);
   const nodes = [...document.body.children];
   for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
-  const settingsToggle = nodes.find(node => node.dataset.twField === 'settingsEnabled');
-  settingsToggle.checked = true;
-  settingsToggle.dispatch('change');
-  assert.equal(config.enabled, true);
-  assert.deepEqual(logs, ['已开启', '已关闭', '已开启']);
+  assert.equal(nodes.some(node => node.dataset.twField === 'settingsEnabled'), false);
+  assert.deepEqual(logs, ['已开启', '已关闭']);
   panel.destroy();
 });
 
