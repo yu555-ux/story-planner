@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "verifiedAgainst": {
+    "tauriTavern": {
+      "version": "2.3.0",
+      "sourceCommit": "a1855be4a4f8b6ee7cd0374a84dbb3709c3e5375",
+      "runtimeVerified": false
+    }
+  },
+  "minimum": {
+    "tauriTavern": "2.3.0",
+    "sillytavern": null,
+    "tavernHelper": null
+  },
+  "requirements": [
+    {
+      "id": "generation-lifecycle-events",
+      "owner": "sillytavern",
+      "symbol": "context.eventTypes.GENERATION_STARTED / GENERATION_ENDED",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "native-context",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "chat-completion-service",
+      "owner": "sillytavern",
+      "symbol": "context.ChatCompletionService.createRequestData",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "generation-interceptor",
+      "owner": "sillytavern",
+      "symbol": "manifest.generate_interceptor",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "prompt-ready-event",
+      "owner": "sillytavern",
+      "symbol": "context.eventTypes.CHAT_COMPLETION_PROMPT_READY",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "tauritavern-host-ready",
+      "owner": "tauritavern",
+      "symbol": "window.__TAURITAVERN__.ready | window.__TAURITAVERN_MAIN_READY__",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "tauritavern-current-chat-handle",
+      "owner": "tauritavern",
+      "symbol": "window.__TAURITAVERN__.api.chat.current.handle",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "tauritavern-chat-metadata-save",
+      "owner": "tauritavern",
+      "symbol": "context.saveMetadata",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "generation-and-message-events",
+      "owner": "shared",
+      "symbol": "context.eventTypes | context.event_types",
+      "required": true,
+      "fallback": null,
+      "events": [
+        "CHAT_COMPLETION_PROMPT_READY",
+        "MESSAGE_RECEIVED",
+        "MESSAGE_SWIPED",
+        "MESSAGE_UPDATED",
+        "MESSAGE_DELETED",
+        "CHAT_CHANGED",
+        "GENERATION_STARTED",
+        "GENERATION_ENDED",
+        "GENERATION_STOPPED"
+      ]
+    }
+  ]
+}

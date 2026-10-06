@@ -1,0 +1,7 @@
+.twsp-dialog {
+  z-index: 10000;
+}
+
+.twsp-history-entry { margin-bottom: 0.75em; }
+.twsp-history-entry > summary { cursor: pointer; padding: 0.6em 0; }
+.twsp-history-entry .twsp-raw { margin-top: 0.5em; }
