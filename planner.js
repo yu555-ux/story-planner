@@ -1177,7 +1177,7 @@
       .twsp-raw{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit}
       .twsp-grid{display:grid;grid-template-columns:1fr;gap:18px}.twsp-field{display:grid;gap:5px;min-width:0;color:#a87967}.twsp-wide{grid-column:1/-1}
       .twsp-input{box-sizing:border-box;width:100%;min-height:48px;padding:9px 14px;border:1px solid #4b2521;border-radius:0;color:#e9c39e;background:#1b0a09;font:inherit}
-      .twsp-model-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}.twsp-model-row>.twsp-button{min-height:48px}
+      .twsp-model-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}.twsp-model-controls>.twsp-input{width:100%}.twsp-model-controls>.twsp-button{min-height:48px;align-self:end}
       .twsp-hint{color:#ae8777}.twsp-error{color:#efa69d;overflow-wrap:anywhere}.twsp-actions{justify-content:flex-end;margin-top:18px}
       .twsp-advanced{margin-top:16px;color:#ae8777}.twsp-advanced>.twsp-grid{margin-top:12px}.twsp-advanced .twsp-actions{justify-content:flex-start}
       .twsp-advanced-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -1238,7 +1238,7 @@
       .twsp-delete-dialog{width:min(420px,calc(100vw - 40px));border:1px solid #713126;color:#d8c1ad;background:linear-gradient(145deg,#2b1110,#180908 65%,#35130f);box-shadow:0 0 40px rgba(20,0,0,.65)}
       .twsp-delete-dialog-header{padding:16px 20px;border-bottom:1px solid #713126;background:#3c1713;color:#e2bc43}.twsp-delete-dialog-body{display:grid;gap:18px;padding:20px}.twsp-delete-dialog-actions{display:flex;justify-content:flex-end;gap:10px}
       .twsp-preset-internal{display:none!important}
-      @media(max-width:520px){.twsp-shell{padding:12px}.twsp-grid,.twsp-advanced-grid{grid-template-columns:1fr}.twsp-wide{grid-column:auto}.twsp-model-row{grid-template-columns:1fr}.twsp-model-row>.twsp-button{width:100%}}
+      @media(max-width:520px){.twsp-shell{padding:12px}.twsp-grid,.twsp-advanced-grid{grid-template-columns:1fr}.twsp-wide{grid-column:auto}.twsp-model-controls{grid-template-columns:1fr}.twsp-model-controls>.twsp-button{width:100%}}
       @media(max-width:720px){.twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}.twsp-prompt-head{flex-wrap:wrap;gap:8px;padding:8px 10px}.twsp-prompt-title{flex:1 1 120px}.twsp-prompt-meta{width:auto;grid-template-columns:auto 40px 30px 18px 18px;gap:8px}.twsp-prompt-editor{padding:14px}.twsp-preset-card{padding:8px}}
       @media(prefers-reduced-motion:reduce){.twsp-dialog *{animation:none!important;transition:none!important}}
       .twsp-dialog{border:1px solid #e8e1d7;border-radius:26px;color:#26312d;background:#faf8f3;box-shadow:0 24px 65px #211b151f}
@@ -1260,7 +1260,7 @@
       .twsp-result-card,.twsp-history-entry,.twsp-preset-card,.twsp-prompt-card,.twsp-settings-section,.twsp-preset-toolbar{border:1px solid #e9e3da;border-radius:17px;background:#fff;box-shadow:0 6px 18px #58453608}
       .twsp-result-card{padding:21px 23px;margin:16px 0}.twsp-result-card .twsp-raw{margin-top:12px}.twsp-history{display:grid;gap:10px}.twsp-history-entry{margin:0;overflow:hidden}.twsp-history-entry>summary{padding:17px 19px;min-height:66px;list-style:none;color:#303c35;font-weight:650}.twsp-history-entry>summary::-webkit-details-marker{display:none}.twsp-history-entry>summary:hover{background:#fcfaf6}.twsp-history-entry>p{margin:0;padding:0 19px;color:#8d948f;font-size:12px}.twsp-history-entry>.twsp-outline,.twsp-history-entry>.twsp-raw{margin:12px 19px 18px}
       .twsp-outline{padding:15px 17px;border-radius:15px;background:#faf8f3}.twsp-outline-meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin-bottom:16px}.twsp-outline-meta-item{display:flex;align-items:center;gap:7px;color:#6c7770;font-size:12px}.twsp-outline-meta-item svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#a79a88}.twsp-outline-event-label{display:block;margin-bottom:7px;color:#a36b2d;font-size:12px;font-weight:700}.twsp-outline-event{margin:0;color:#303c35;font-size:16px;font-weight:500;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}.twsp-outline>details{margin-top:15px;border-top:1px solid #e8e2d7;padding-top:10px}.twsp-outline>details summary{color:#a9671c;font-size:12px;cursor:pointer}.twsp-outline .twsp-raw{margin:10px 0 0;color:#66716a;font-size:13px}
-      .twsp-input{border-color:#e6e4dd;border-radius:11px;color:#39413b;background:#faf9f6}.twsp-field{color:#757b75;font-size:13px;font-weight:600}.twsp-grid{gap:15px}.twsp-model-row>.twsp-button{min-height:48px}.twsp-actions{gap:10px}
+      .twsp-input{border-color:#e6e4dd;border-radius:11px;color:#39413b;background:#faf9f6}.twsp-field{color:#757b75;font-size:13px;font-weight:600}.twsp-grid{gap:15px}.twsp-model-controls>.twsp-button{min-height:48px}.twsp-actions{gap:10px}
       .twsp-settings-section{padding:21px;margin:12px 0}.twsp-settings-section>summary{list-style:none;cursor:pointer;font-size:16px;font-weight:700}.twsp-settings-section>summary::-webkit-details-marker{display:none}.twsp-settings-section .twsp-grid{margin-top:19px}.twsp-settings-section .twsp-actions{justify-content:flex-start}
       .twsp-advanced{margin:12px 0;padding:18px 21px;border:1px solid #e9e3da;border-radius:16px;background:#fff;color:#48534d}.twsp-advanced summary{cursor:pointer;font-weight:700}
       .twsp-preset-toolbar{padding:18px 20px;border-bottom:1px solid #e9e3da}.twsp-preset-active{color:#7d8781;font-size:12px}.twsp-preset-active strong{color:#a9671c;font-weight:700}.twsp-preset-kind{border:0;border-radius:999px;background:#f9edda;color:#9a641f;font-size:11px}
@@ -1565,10 +1565,6 @@
     settingsPanel.setAttribute('role', 'tabpanel');
     settingsPanel.id = 'twsp-settings-panel';
     settingsTab.setAttribute('aria-controls', settingsPanel.id);
-    const settingsHeading = element('div', 'twsp-page-heading');
-    const settingsHeadingText = element('div');
-    settingsHeadingText.append(element('span', 'twsp-eyebrow', 'PREFERENCES'), element('h3', 'twsp-page-title', '设置'), element('p', 'twsp-page-description', '连接模型并调整规划方式'));
-    settingsHeading.append(settingsHeadingText, element('span', 'twsp-version', options.version ? `v${options.version}` : ''));
     const grid = element('div', 'twsp-grid');
     const apiurl = field('API 地址', 'apiurl', 'url');
     apiurl.wrapper.className += ' twsp-wide';
@@ -1577,10 +1573,17 @@
     key.input.placeholder = '请输入 API 密钥';
     key.wrapper.append(element('small', 'twsp-hint', '已保存密钥会以圆点遮罩显示；可直接替换，清空并保存会移除。'));
     key.wrapper.className += ' twsp-wide';
-    const model = field('模型名称', 'model');
-    const modelRow = element('div', 'twsp-model-row');
+    const modelField = element('div', 'twsp-field');
+    const modelLabel = element('label', '', '模型名称');
+    const modelInput = mark(element('input', 'twsp-input'), 'field', 'model');
+    modelInput.type = 'text';
+    modelInput.id = 'twsp-model-name';
+    modelLabel.setAttribute('for', modelInput.id);
+    const model = { wrapper: modelField, input: modelInput };
+    const modelControls = element('div', 'twsp-model-controls');
     const fetchButton = button('获取模型', 'fetchModels');
-    modelRow.append(model.wrapper, fetchButton);
+    modelControls.append(modelInput, fetchButton);
+    modelField.append(modelLabel, modelControls);
     const modelOptions = mark(element('select', 'twsp-input'), 'field', 'modelOptions');
     modelOptions.hidden = true;
     modelOptions.setAttribute('aria-label', '选择获取到的模型');
@@ -1602,7 +1605,7 @@
     temperature.input.min = '0'; temperature.input.max = '2'; temperature.input.step = '0.1';
     const parameterRow = element('div', 'twsp-grid twsp-advanced-grid');
     parameterRow.append(temperature.wrapper, maxTokens.wrapper);
-    grid.append(apiurl.wrapper, key.wrapper, modelRow, modelOptions);
+    grid.append(apiurl.wrapper, key.wrapper, modelField, modelOptions);
     const paramsGrid = element('div', 'twsp-grid twsp-params-grid');
     paramsGrid.append(timeout.wrapper, retryCount.wrapper, parameterRow);
     const advanced = element('div', 'twsp-advanced');
@@ -1636,7 +1639,7 @@
     const diagnosticActions = element('div', 'twsp-actions');
     diagnosticActions.append(testButton, toolProbeButton);
     diagnosticsSection.append(advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), diagnosticActions);
-    settingsPanel.append(settingsHeading, connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
+    settingsPanel.append(connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
     const presetsPanel = element('section', 'twsp-panel');
     presetsPanel.id = 'twsp-presets-panel'; presetsPanel.setAttribute('role', 'tabpanel');
     presetsTab.setAttribute('aria-controls', presetsPanel.id);
