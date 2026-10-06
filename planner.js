@@ -1306,6 +1306,14 @@
       .twsp-input[data-tw-field="key"]::placeholder{color:#68756e;opacity:1;letter-spacing:.12em}
       .twsp-input:focus{border-color:#bd8a4f}.twsp-raw{color:#536058;font-size:14px;line-height:1.7}
       .twsp-hint{color:var(--twsp-muted)}.twsp-error{color:#a43e32}
+      .twsp-model-combobox{position:relative;min-width:0}.twsp-model-combobox>.twsp-input{width:100%;padding-right:48px}
+      .twsp-model-toggle{position:absolute;top:4px;right:4px;width:40px;height:40px;border:0;border-radius:8px;background:transparent;color:var(--twsp-muted);font:inherit;cursor:pointer}
+      .twsp-model-toggle:hover{color:var(--twsp-brand);background:#eee8df}.twsp-model-toggle:disabled{opacity:.4;cursor:default;background:transparent}
+      .twsp-model-toggle:focus-visible{outline:2px solid var(--twsp-brand);outline-offset:2px}
+      .twsp-model-menu{position:absolute;z-index:30;top:calc(100% + 5px);left:0;right:0;max-height:min(320px,45vh);overflow-y:auto;border:1px solid var(--twsp-border);border-radius:11px;background:var(--twsp-surface);box-shadow:0 12px 30px #211b1526}
+      .twsp-model-menu[hidden]{display:none}.twsp-model-menu-heading{position:sticky;top:0;padding:10px 14px;border-bottom:1px solid var(--twsp-border);background:var(--twsp-surface);color:var(--twsp-muted);font-size:12px}
+      .twsp-model-option,.twsp-model-empty{padding:10px 14px;overflow-wrap:anywhere;font-size:14px;font-weight:400}.twsp-model-option{cursor:pointer;color:var(--twsp-ink)}
+      .twsp-model-option:hover,.twsp-model-option[data-active="true"]{background:#f5eee5;color:var(--twsp-brand)}.twsp-model-empty{color:var(--twsp-muted)}
 
       .twsp-result-card{padding:28px 30px;margin:18px 0 0;border-radius:26px;box-shadow:0 12px 34px #5845360d}
       .twsp-result-top{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px}
@@ -1578,15 +1586,30 @@
     const modelInput = mark(element('input', 'twsp-input'), 'field', 'model');
     modelInput.type = 'text';
     modelInput.id = 'twsp-model-name';
+    modelInput.autocomplete = 'off';
+    modelInput.placeholder = '请输入模型名称';
     modelLabel.setAttribute('for', modelInput.id);
     const model = { wrapper: modelField, input: modelInput };
     const modelControls = element('div', 'twsp-model-controls');
     const fetchButton = button('获取模型', 'fetchModels');
-    modelControls.append(modelInput, fetchButton);
+    const modelCombobox = element('div', 'twsp-model-combobox');
+    const modelToggle = element('button', 'twsp-model-toggle', '▾');
+    modelToggle.type = 'button';
+    modelToggle.disabled = true;
+    modelToggle.setAttribute('aria-label', '展开已获取的模型列表');
+    const modelMenu = element('div', 'twsp-model-menu');
+    modelMenu.id = 'twsp-model-options';
+    modelMenu.hidden = true;
+    modelMenu.setAttribute('role', 'listbox');
+    modelMenu.setAttribute('aria-label', '已获取的模型');
+    modelInput.setAttribute('role', 'combobox');
+    modelInput.setAttribute('aria-autocomplete', 'list');
+    modelInput.setAttribute('aria-haspopup', 'listbox');
+    modelInput.setAttribute('aria-controls', modelMenu.id);
+    modelInput.setAttribute('aria-expanded', 'false');
+    modelCombobox.append(modelInput, modelToggle, modelMenu);
+    modelControls.append(modelCombobox, fetchButton);
     modelField.append(modelLabel, modelControls);
-    const modelOptions = mark(element('select', 'twsp-input'), 'field', 'modelOptions');
-    modelOptions.hidden = true;
-    modelOptions.setAttribute('aria-label', '选择获取到的模型');
     const timeout = field('请求超时（秒）', 'timeoutSeconds', 'number');
     timeout.input.min = '1'; timeout.input.max = '600'; timeout.input.step = '1';
     timeout.wrapper.append(element('small', 'twsp-hint', '本轮、下一轮及补救任务均共用此总时限，包含重试与等待。'));
@@ -1605,7 +1628,7 @@
     temperature.input.min = '0'; temperature.input.max = '2'; temperature.input.step = '0.1';
     const parameterRow = element('div', 'twsp-grid twsp-advanced-grid');
     parameterRow.append(temperature.wrapper, maxTokens.wrapper);
-    grid.append(apiurl.wrapper, key.wrapper, modelField, modelOptions);
+    grid.append(apiurl.wrapper, key.wrapper, modelField);
     const paramsGrid = element('div', 'twsp-grid twsp-params-grid');
     paramsGrid.append(timeout.wrapper, retryCount.wrapper, parameterRow);
     const advanced = element('div', 'twsp-advanced');
@@ -2076,6 +2099,7 @@
         Promise.resolve(options.checkPreviewFresh?.(previewContextHash)).then(current => { if (stamp === previewStamp && current === false) invalidatePreview(); }).catch(() => invalidatePreview());
       }
       if (syncFields) {
+        if (modelEntries.length && (apiurl.input.value !== view.config.apiurl || key.input.value !== view.config.key)) setModelEntries([]);
         apiurl.input.value = view.config.apiurl;
         key.input.value = view.config.key;
         model.input.value = view.config.model;
@@ -2266,7 +2290,83 @@
         presetStatus.textContent = `复制失败：${error?.message ?? '剪贴板不可用'}`;
       }
     });
-    modelOptions.addEventListener('change', () => { if (modelOptions.value) model.input.value = modelOptions.value; });
+    let modelEntries = [];
+    let visibleModelEntries = [];
+    let modelOptionNodes = [];
+    let activeModelIndex = -1;
+    function closeModelMenu() {
+      modelMenu.hidden = true;
+      modelInput.setAttribute('aria-expanded', 'false');
+      modelInput.removeAttribute('aria-activedescendant');
+      activeModelIndex = -1;
+    }
+    function setModelEntries(entries) {
+      modelEntries = entries;
+      modelInput.placeholder = entries.length ? `已获取 ${entries.length} 个模型，点击选择` : '请输入模型名称';
+      modelToggle.disabled = entries.length === 0;
+      closeModelMenu();
+      modelMenu.replaceChildren();
+    }
+    function activateModel(index) {
+      if (activeModelIndex >= 0) modelOptionNodes[activeModelIndex]?.removeAttribute('data-active');
+      activeModelIndex = index;
+      const option = modelOptionNodes[index];
+      if (option) {
+        option.dataset.active = 'true';
+        modelInput.setAttribute('aria-activedescendant', option.id);
+        option.scrollIntoView?.({ block: 'nearest' });
+      } else modelInput.removeAttribute('aria-activedescendant');
+    }
+    function selectModel(name) {
+      modelInput.value = name;
+      closeModelMenu();
+      modelInput.focus?.();
+    }
+    function openModelMenu(query = '') {
+      if (!modelEntries.length) return;
+      visibleModelEntries = modelEntries.filter(name => name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+      const heading = element('div', 'twsp-model-menu-heading', `已获取 ${modelEntries.length} 个模型`);
+      heading.setAttribute('role', 'presentation');
+      modelOptionNodes = visibleModelEntries.map((name, index) => {
+        const option = element('div', 'twsp-model-option', name);
+        option.id = `twsp-model-option-${index}`;
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', String(name === modelInput.value));
+        option.addEventListener('click', () => selectModel(name));
+        return option;
+      });
+      modelMenu.replaceChildren(heading, ...(modelOptionNodes.length ? modelOptionNodes : [element('div', 'twsp-model-empty', '没有匹配的模型，可继续手动输入')]));
+      modelMenu.hidden = false;
+      modelInput.setAttribute('aria-expanded', 'true');
+      activeModelIndex = -1;
+      modelInput.removeAttribute('aria-activedescendant');
+    }
+    modelInput.addEventListener('click', () => { if (modelMenu.hidden) openModelMenu(); });
+    modelInput.addEventListener('input', () => { if (modelEntries.length) openModelMenu(modelInput.value); });
+    modelInput.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !modelMenu.hidden) {
+        event.preventDefault(); event.stopPropagation(); closeModelMenu();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (!modelEntries.length) return;
+        event.preventDefault();
+        if (modelMenu.hidden) openModelMenu();
+        if (modelOptionNodes.length) activateModel(activeModelIndex < 0
+          ? (event.key === 'ArrowDown' ? 0 : modelOptionNodes.length - 1)
+          : (activeModelIndex + (event.key === 'ArrowDown' ? 1 : -1) + modelOptionNodes.length) % modelOptionNodes.length);
+      } else if (event.key === 'Enter' && !modelMenu.hidden && activeModelIndex >= 0) {
+        event.preventDefault(); selectModel(visibleModelEntries[activeModelIndex]);
+      } else if (event.key === 'Tab') {
+        closeModelMenu();
+      }
+    });
+    modelToggle.addEventListener('click', () => {
+      if (modelMenu.hidden) { openModelMenu(); modelInput.focus?.(); }
+      else closeModelMenu();
+    });
+    root.addEventListener('pointerdown', event => { if (!modelCombobox.contains(event.target)) closeModelMenu(); });
+    for (const input of [apiurl.input, key.input]) input.addEventListener('input', () => {
+      if (modelEntries.length) { setModelEntries([]); checkStatus.textContent = '连接信息已改变，旧模型列表作废。'; }
+    });
     const tabOrder = [['result', resultTab], ['presets', presetsTab], ['settings', settingsTab]];
     for (const [, tab] of tabOrder) tab.addEventListener('keydown', event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -2319,7 +2419,7 @@
     fetchButton.addEventListener('click', async () => {
       if (fetchButton.disabled) return;
       fetchButton.disabled = true;
-      modelOptions.hidden = true;
+      setModelEntries([]);
       checkStatus.textContent = '正在获取模型…';
       const requested = draft();
       try {
@@ -2327,17 +2427,7 @@
         if (requested.apiurl !== apiurl.input.value || requested.key !== key.input.value) {
           checkStatus.textContent = '连接信息已改变，旧模型列表作废。';
         } else if (result.ok) {
-          modelOptions.textContent = '';
-          const placeholder = element('option', '', `已获取 ${result.models.length} 个模型，点击选择`);
-          placeholder.value = '';
-          modelOptions.append(placeholder);
-          for (const name of result.models) {
-            const option = element('option', '', name);
-            option.value = name;
-            modelOptions.append(option);
-          }
-          modelOptions.value = '';
-          modelOptions.hidden = false;
+          setModelEntries(result.models);
           checkStatus.textContent = `已获取 ${result.models.length} 个模型；也可继续手填模型名。`;
         } else checkStatus.textContent = result.error;
       } catch { checkStatus.textContent = '获取模型失败；请手填模型名。'; }
@@ -3016,7 +3106,7 @@
         );
         if (destroyed || revision !== configRevision) return { ok: false, error: '设置已变更，旧模型列表作废。' };
         if (!Array.isArray(received)) return { ok: false, error: '模型列表返回格式不正确。' };
-        const models = received.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()).slice(0, 200);
+        const models = received.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()).sort((a, b) => a.localeCompare(b));
         return models.length ? { ok: true, models } : { ok: false, error: '没有获取到模型，请检查地址和密钥，或手填模型名。' };
       } catch (error) {
         return { ok: false, error: error?.message === '请求超时' ? '获取模型超时；列表请求无法通过当前接口取消。' : '获取模型失败，请检查地址和密钥，或手填模型名。' };
