@@ -1271,6 +1271,157 @@
       .twsp-prompt-editor{border-top-color:#ebe5dc;background:#fff}.twsp-prompt-editor .twsp-input{min-height:44px;border-color:#e6e4dd;color:#39413b;background:#faf9f6;font-size:14px}.twsp-prompt-content{min-height:160px}.twsp-prompt-hint,.twsp-prompt-flag{color:#7d8781;font-size:12px}.twsp-prompt-advanced-button{color:#a9671c;font-size:12px}.twsp-prompt-advanced-grid{border-top-color:#ebe5dc}.twsp-prompt-flag input{accent-color:#a9671c}.twsp-add-prompt{border-color:#cda978;color:#a9671c;font-size:13px}.twsp-preset-actions{border-top-color:#e9e3da}.twsp-delete-overlay{background:#1419198c}.twsp-delete-dialog{border:1px solid #e9e3da;border-radius:18px;overflow:hidden;color:#303c35;background:#fff;box-shadow:0 24px 65px #211b1530}.twsp-delete-dialog-header{border-bottom-color:#e9e3da;background:#faf8f3;color:#303c35;font-weight:700}
       @media(max-width:720px){.twsp-head{padding:16px}.twsp-tabs{padding:0 12px 12px;overflow-x:auto;flex-wrap:nowrap}.twsp-panel{padding:21px 16px}.twsp-page-title{font-size:24px}.twsp-prompt-meta{width:auto;grid-template-columns:auto auto auto auto auto}.twsp-prompt-icon{min-width:34px}.twsp-preset-toolbar{align-items:flex-start}.twsp-dialog{border-radius:18px}}
       @media(max-width:520px){.twsp-shell{padding:0}.twsp-page-heading{align-items:flex-start;flex-wrap:wrap}.twsp-result-card{padding:16px}.twsp-outline-meta{gap:8px 14px}.twsp-actions{justify-content:flex-start}.twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}}
+
+      /* Warm visual system shared by every panel. */
+      .twsp-dialog{
+        --twsp-bg:#faf8f4;--twsp-surface:#fff;--twsp-ink:#26312d;--twsp-muted:#5d6962;
+        --twsp-faint:#68756d;--twsp-border:#e9e2d8;--twsp-brand:#995d19;--twsp-brand-hover:#824d14;
+        --twsp-soft:#faf7f2;--twsp-green:#e8f0e8;--twsp-green-ink:#416148;
+        width:min(1080px,calc(100vw - 24px));border-color:var(--twsp-border);background:var(--twsp-bg);color:var(--twsp-ink)
+      }
+      .twsp-shell{font:16px/1.55 system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+      .twsp-head{padding:24px 34px 18px}.twsp-brand{display:flex;align-items:center;gap:15px;min-width:0}
+      .twsp-brand-mark{display:grid;place-items:center;flex:none;width:54px;height:54px;border-radius:18px;background:#eedbb8;color:#8d5b21}
+      .twsp-brand-mark svg{width:26px;height:26px;fill:currentColor;stroke:none}
+      .twsp-title{font-size:23px;line-height:1.25;font-weight:700}.twsp-head-subtitle{margin-top:2px;color:var(--twsp-muted);font-size:13px}
+      .twsp-activation{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;min-height:42px;border-color:var(--twsp-border);font-size:13px;white-space:nowrap}
+      .twsp-activation[data-enabled="true"]{border-color:#dfe9df;background:var(--twsp-green);color:var(--twsp-green-ink)}
+      .twsp-activation[data-enabled="true"]:before{content:"";width:8px;height:8px;border-radius:50%;background:#5d9b68}
+      .twsp-close{border:0;background:#efede8;color:#64706a}
+      .twsp-tabs{gap:5px;padding:0 34px 17px;border-bottom:1px solid var(--twsp-border)}
+      .twsp-tab{display:inline-flex;align-items:center;gap:10px;padding:10px 20px;min-height:46px;color:#64726d;font-size:15px}
+      .twsp-inline-icon{display:inline-flex;align-items:center;justify-content:center;flex:none}
+      .twsp-inline-icon svg,.twsp-section-chevron svg,.twsp-history-chevron svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .twsp-panel{padding:38px 36px 34px}.twsp-page-heading{min-height:88px;margin-bottom:30px}
+      .twsp-eyebrow{display:block;margin-bottom:7px;color:var(--twsp-brand);font-size:11px;font-weight:750;letter-spacing:.18em}
+      .twsp-page-title{font-size:32px;font-weight:700;line-height:1.2}.twsp-page-description{margin-top:6px;color:var(--twsp-muted);font-size:14px}
+      .twsp-version{align-self:center;background:#f3e6d5;color:var(--twsp-brand);font-size:12px}
+      .twsp-button,.twsp-close,.twsp-tab,.twsp-preset-menu-action{touch-action:manipulation}
+      .twsp-button{padding:10px 16px;border-color:var(--twsp-border);color:#655e53;font-weight:650}
+      .twsp-button--primary{padding:11px 20px;border-color:var(--twsp-brand);background:var(--twsp-brand);color:#fff}
+      .twsp-button--primary:hover{background:var(--twsp-brand-hover)}
+      .twsp-button:disabled{opacity:.48}.twsp-field{gap:7px;color:#6b7871;font-size:13px;font-weight:650}
+      .twsp-field .twsp-hint{font-weight:400}.twsp-input{min-height:48px;border-color:#e5e1da;background:var(--twsp-soft);color:var(--twsp-ink);font-size:15px}
+      .twsp-input:focus{border-color:#bd8a4f}.twsp-raw{color:#536058;font-size:14px;line-height:1.7}
+      .twsp-hint{color:var(--twsp-muted)}.twsp-error{color:#a43e32}
+
+      .twsp-result-card{padding:28px 30px;margin:18px 0 0;border-radius:26px;box-shadow:0 12px 34px #5845360d}
+      .twsp-result-top{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px}
+      .twsp-result-state{display:inline-flex;padding:6px 12px;border-radius:999px;background:#f9ecd7;color:#98601e;font-size:12px;font-weight:750}
+      .twsp-result-source{color:var(--twsp-faint);font-size:12px;text-align:right}
+      .twsp-result-card .twsp-outline{padding:0;background:transparent}
+      .twsp-outline{background:var(--twsp-soft);border-radius:16px}
+      .twsp-result-card .twsp-outline-meta{margin:0 0 22px}.twsp-outline-meta-item{gap:8px;color:#64716a;font-size:13px}
+      .twsp-outline-meta-item svg{width:16px;height:16px;color:#a9855f}
+      .twsp-outline-event-box{padding:20px 23px;border-radius:16px;background:var(--twsp-soft)}
+      .twsp-outline-event-label{margin-bottom:8px;color:#925b1f;font-size:13px}
+      .twsp-outline-event{font-size:17px;line-height:1.9;font-weight:500}
+      .twsp-outline>details{margin-top:22px;padding-top:15px;border-color:var(--twsp-border)}
+      .twsp-outline>details summary{min-height:44px;text-align:right;font-size:13px;font-weight:700}
+      .twsp-result-card .twsp-outline>details .twsp-raw{padding:12px;border-radius:10px;background:var(--twsp-soft)}
+      .twsp-list-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:32px 0 15px}
+      .twsp-list-heading h4{margin:0;font-size:20px;font-weight:700}.twsp-list-heading .twsp-hint{font-size:13px}
+      .twsp-history{gap:12px}.twsp-history-entry{border-radius:18px;box-shadow:none}
+      .twsp-history-entry>summary{display:flex;align-items:center;gap:17px;padding:15px 18px;min-height:75px;font-weight:400}
+      .twsp-history-number{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:12px;background:#f3f0ea;color:#725c43;font-size:13px}
+      .twsp-history-main{display:grid;flex:1;gap:4px;min-width:0}.twsp-history-main strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
+      .twsp-history-main small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--twsp-faint);font-size:12px}
+      .twsp-history-state{padding:6px 10px;border-radius:999px;background:#edf2eb;color:#55715a;font-size:11px;white-space:nowrap}
+      .twsp-history-chevron{color:#64716a}.twsp-history-entry[open] .twsp-history-chevron{transform:rotate(180deg)}
+      .twsp-history-entry>p{padding:0 19px}.twsp-history-entry>.twsp-outline,.twsp-history-entry>.twsp-raw{margin:12px 19px 20px}
+
+      .twsp-settings-status{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 28px;margin-bottom:16px;border:1px solid var(--twsp-border);border-radius:23px;background:var(--twsp-surface)}
+      .twsp-settings-status>div{display:grid;gap:5px}.twsp-settings-status strong{font-size:16px;font-weight:650}
+      .twsp-card-caption{color:var(--twsp-faint);font-size:12px;font-weight:500}
+      .twsp-settings-switch{position:relative;display:inline-flex;align-items:center;flex:none;min-width:54px;min-height:44px;cursor:pointer}
+      .twsp-settings-switch input{position:absolute;opacity:0;width:54px;height:36px;margin:0;cursor:pointer}
+      .twsp-settings-switch-track{display:block;width:52px;height:31px;padding:3px;border-radius:999px;background:#c7cac5;transition:background .18s ease}
+      .twsp-settings-switch-track:before{content:"";display:block;width:25px;height:25px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0002;transition:transform .18s ease}
+      .twsp-settings-switch input:checked+.twsp-settings-switch-track{background:#68a074}
+      .twsp-settings-switch input:checked+.twsp-settings-switch-track:before{transform:translateX(21px)}
+      .twsp-settings-switch input:focus-visible+.twsp-settings-switch-track{outline:2px solid var(--twsp-brand);outline-offset:3px}
+      .twsp-settings-section{padding:0;margin:12px 0;border-radius:20px;box-shadow:none}
+      .twsp-settings-section>summary{display:flex;justify-content:space-between;align-items:center;min-height:72px;padding:18px 24px;font-size:16px;cursor:pointer}
+      .twsp-settings-section-title{display:inline-flex;align-items:center;gap:12px}.twsp-settings-section-title .twsp-inline-icon{color:#b27a3b}
+      .twsp-section-chevron{display:inline-flex;color:#64716a;transition:transform .18s ease}.twsp-settings-section[open] .twsp-section-chevron{transform:rotate(180deg)}
+      .twsp-settings-section>.twsp-grid{margin:0;padding:4px 24px 24px}
+      .twsp-settings-section .twsp-params-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .twsp-settings-section .twsp-advanced-grid{grid-column:1/-1}
+      .twsp-advanced{margin:0 24px 16px;padding:0;border:0;background:transparent}
+      .twsp-advanced .twsp-actions,.twsp-settings-section>.twsp-actions{justify-content:flex-start;margin:0;padding:0 24px 22px}
+      .twsp-advanced .twsp-actions{padding:0}.twsp-settings-section>.twsp-hint{display:block;margin:10px 24px 14px;font-size:12px}
+      .twsp-panel>.twsp-actions{margin-top:28px}.twsp-panel>[data-tw-view="checkStatus"]:empty{display:none}
+      .twsp-panel>[data-tw-view="checkStatus"]{margin:14px 0 0}
+
+      .twsp-preset-cards{display:grid;gap:12px;margin:0 0 10px}
+      .twsp-preset-card{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:126px;padding:24px 28px;border-color:var(--twsp-border);border-radius:23px;box-shadow:none}
+      .twsp-preset-card[data-selected="true"]{border-color:var(--twsp-border);background:var(--twsp-surface)}
+      .twsp-preset-card-info{display:grid;gap:4px;flex:1;min-width:0}
+      .twsp-preset-card-name{display:block;max-width:100%;min-height:44px;padding:0;overflow:hidden;text-overflow:ellipsis;color:var(--twsp-ink);font-size:18px;font-weight:650;white-space:nowrap}
+      .twsp-preset-card-status{color:#526b57;font-size:13px}.twsp-preset-card-controls{display:flex;align-items:center;gap:10px;flex:none}
+      .twsp-preset-card-controls>.twsp-button{min-width:104px}.twsp-preset-manage{position:relative}
+      .twsp-preset-manage>summary{display:grid;place-items:center;min-width:64px;min-height:44px;padding:8px 12px;border:1px solid var(--twsp-border);border-radius:12px;color:#756e63;font-size:13px;font-weight:650;list-style:none;cursor:pointer}
+      .twsp-preset-manage>summary::-webkit-details-marker{display:none}.twsp-preset-manage[open]>summary{background:var(--twsp-soft)}
+      .twsp-preset-card-actions{position:absolute;z-index:5;top:calc(100% + 8px);right:0;display:grid;gap:3px;min-width:126px;padding:6px;border:1px solid var(--twsp-border);border-radius:13px;background:var(--twsp-surface);box-shadow:0 12px 30px #211b1520}
+      .twsp-preset-manage:not([open]) .twsp-preset-card-actions{display:none}
+      .twsp-preset-menu-action{min-height:44px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--twsp-ink);text-align:left;font:inherit;font-size:13px;cursor:pointer}
+      .twsp-preset-menu-action:hover{background:var(--twsp-soft)}.twsp-preset-menu-action.twsp-danger{color:#a43e32}
+      .twsp-preset-editname{margin:12px 0 20px}.twsp-preset-compat{border-radius:15px;background:#fffbf4}
+      .twsp-prompt-list-heading{margin-top:32px;margin-bottom:14px}.twsp-add-prompt{width:auto;min-height:44px;padding:8px 0;border:0;border-radius:0;color:var(--twsp-brand);background:transparent;font-size:14px;font-weight:700}
+      .twsp-add-prompt:hover{background:transparent;color:var(--twsp-brand-hover)}
+      .twsp-prompt-list{gap:12px;margin:0}.twsp-prompt-card{border-color:var(--twsp-border);border-radius:17px;background:var(--twsp-surface);box-shadow:none}
+      .twsp-prompt-card[data-enabled="false"]{opacity:1;background:#f9f9f7}
+      .twsp-prompt-head{display:flex;align-items:center;gap:16px;min-height:82px;padding:14px 18px}
+      .twsp-prompt-drag{display:grid;place-items:center;flex:none;width:28px;height:44px;color:#80766b;opacity:1;cursor:grab}
+      .twsp-prompt-drag svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round}
+      .twsp-prompt-heading-text{display:grid;gap:2px;flex:1;min-width:0}
+      .twsp-prompt-title{min-height:44px;padding:0;color:var(--twsp-ink);font-size:15px;font-weight:650;letter-spacing:0}
+      .twsp-prompt-subtitle{display:flex;align-items:center;gap:9px;color:var(--twsp-faint)}
+      .twsp-prompt-role{min-width:0;padding:0;border:0;background:transparent;color:var(--twsp-faint);font:inherit;font-size:12px;letter-spacing:0;text-transform:capitalize}
+      .twsp-prompt-role[data-role="user"],.twsp-prompt-role[data-role="assistant"]{color:var(--twsp-faint)}
+      .twsp-prompt-size{width:auto;min-width:0;color:var(--twsp-faint);font-size:12px;text-align:left}
+      .twsp-prompt-size:before{content:"·";margin-right:9px}.twsp-prompt-meta{display:flex;align-items:center;gap:9px;width:auto;flex:none}
+      .twsp-switch{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:56px;width:auto;min-height:44px;height:44px}
+      .twsp-switch input{position:absolute;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+      .twsp-switch input:focus-visible+.twsp-prompt-enabled-text{outline:2px solid var(--twsp-brand);outline-offset:2px}
+      .twsp-prompt-enabled-text{display:inline-flex;align-items:center;justify-content:center;min-width:56px;padding:6px 10px;border-radius:999px;background:var(--twsp-green);color:var(--twsp-green-ink);font-size:12px;white-space:nowrap}
+      .twsp-switch input:not(:checked)+.twsp-prompt-enabled-text{background:#e9e8e4;color:#6b736d}
+      .twsp-prompt-expand{width:44px;height:44px;min-height:44px}.twsp-prompt-expand svg{width:17px;height:17px;transition:transform .18s ease}
+      .twsp-prompt-card[data-expanded="true"] .twsp-prompt-expand svg{transform:rotate(180deg)}
+      .twsp-prompt-editor{gap:18px;padding:22px;border-top-color:var(--twsp-border);background:var(--twsp-surface)}
+      .twsp-prompt-fields,.twsp-prompt-fields--position{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+      .twsp-prompt-editor .twsp-input{min-height:46px;border-color:#e5e1da;background:var(--twsp-soft);color:var(--twsp-ink);font-size:14px}
+      .twsp-prompt-content{min-height:175px}.twsp-prompt-advanced-grid{border-color:var(--twsp-border)}
+      .twsp-prompt-editor-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .twsp-prompt-advanced-button{min-height:44px;color:var(--twsp-brand);font-size:13px}
+      .twsp-button--danger{border-color:#edd1cb;color:#a43e32;background:#fff7f5}
+      .twsp-preset-actions{justify-content:flex-end;gap:10px;margin-top:22px;padding-top:0;border:0}
+      .twsp-preset-footnote{margin-top:26px;font-size:12px}.twsp-panel>[data-tw-view="presetPreview"]{margin-top:14px;padding:14px;border-radius:12px;background:var(--twsp-surface)}
+      .twsp-preset-manage>summary:focus-visible,.twsp-preset-menu-action:focus-visible,
+      .twsp-settings-section>summary:focus-visible,.twsp-outline>details summary:focus-visible{outline:2px solid var(--twsp-brand);outline-offset:2px}
+
+      @media(max-width:720px){
+        .twsp-head{padding:18px}.twsp-brand-mark{width:46px;height:46px;border-radius:15px}.twsp-title{font-size:19px}
+        .twsp-activation{margin-left:auto}.twsp-tabs{padding:0 13px 13px}.twsp-tab{padding:9px 14px}
+        .twsp-panel{padding:25px 18px}.twsp-page-title{font-size:28px}.twsp-page-heading{min-height:0;margin-bottom:24px}
+        .twsp-preset-card{padding:20px;min-height:110px}.twsp-prompt-head{gap:9px;padding:12px}
+        .twsp-prompt-fields,.twsp-prompt-fields--position,.twsp-prompt-advanced-grid{grid-template-columns:1fr}
+      }
+      @media(max-width:520px){
+        .twsp-head{gap:8px}.twsp-head-subtitle{display:none}.twsp-brand{gap:9px}.twsp-brand-mark{width:40px;height:40px}
+        .twsp-activation{order:3;margin-left:0;min-height:38px;padding:7px 10px;font-size:12px}.twsp-close{margin-left:auto}
+        .twsp-page-heading .twsp-button--primary{width:100%}.twsp-page-heading{align-items:flex-start}
+        .twsp-result-card{padding:20px}.twsp-result-top{align-items:flex-start;flex-wrap:wrap}.twsp-outline-event-box{padding:16px}
+        .twsp-history-main small{white-space:normal}.twsp-history-state{display:none}
+        .twsp-settings-status{padding:18px}.twsp-settings-section>summary{padding:16px 18px}
+        .twsp-settings-section>.twsp-grid{padding:4px 18px 20px}.twsp-settings-section .twsp-params-grid{grid-template-columns:1fr}
+        .twsp-preset-card{align-items:flex-start;flex-wrap:wrap}.twsp-preset-card-controls{width:100%;justify-content:flex-end}
+        .twsp-prompt-subtitle{gap:5px;flex-wrap:wrap}.twsp-prompt-meta{gap:2px}.twsp-prompt-drag{width:20px}
+        .twsp-prompt-editor{padding:16px}.twsp-preset-actions{justify-content:flex-start}
+      }
+      .twsp-dialog [hidden]{display:none!important}
+      .twsp-dialog [data-tw-view="planningTask"]:empty,.twsp-dialog [data-tw-view="error"]:empty,
+      .twsp-dialog [data-tw-view="presetStatus"]:empty,.twsp-dialog [data-tw-view="presetPreview"]:empty{display:none}
     `;
     function element(tag, className = '', content = '') {
       const node = doc.createElement(tag);
@@ -1298,27 +1449,42 @@
         download: ['M12 3v12', 'm7 10 5 5 5-5', 'M4 19h16'],
         clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M12 7v5l3 2'],
         pin: ['M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z', 'M12 10a2 2 0 1 0 0 .01Z'],
+        notebook: ['M7 3h13v18H7a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z', 'M4 7h4', 'M4 12h4', 'M4 17h4', 'm12-7 2 2-4 4-2 .5.5-2 3-3Z'],
+        layers: ['m12 3 9 5-9 5-9-5 9-5Z', 'm3 12 9 5 9-5', 'm3 16 9 5 9-5'],
+        sliders: ['M4 7h16', 'M4 17h16', 'M9 4v6', 'M15 14v6'],
+        link: ['M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2', 'M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2'],
+        sparkle: ['m12 2 1.9 7.1L21 11l-7.1 1.9L12 20l-1.9-7.1L3 11l7.1-1.9L12 2Z', 'm19 18 .5 1.5L21 20l-1.5.5L19 22l-.5-1.5L17 20l1.5-.5L19 18Z'],
+        stethoscope: ['M6 3H4v6a6 6 0 0 0 12 0V3h-2', 'M10 15v2a4 4 0 0 0 8 0v-2', 'M18 15a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z'],
+        chevron: ['m6 9 6 6 6-6'],
+        grip: ['M9 5h.01', 'M15 5h.01', 'M9 12h.01', 'M15 12h.01', 'M9 19h.01', 'M15 19h.01'],
       }[name] ?? [];
       for (const d of paths) { const path = doc.createElementNS(ns, 'path'); path.setAttribute('d', d); svg.append(path); }
       node.replaceChildren(svg); return node;
     }
-    function outlineCard(body) {
+    function inlineIcon(name, className = 'twsp-inline-icon') { return icon(element('span', className), name); }
+    function outlineParts(body) {
       const raw = String(body ?? '');
       const match = raw.match(/^\s*时间\s*[:：]\s*([\s\S]*?)\n\s*地点\s*[:：]\s*([\s\S]*?)\n\s*事件内容\s*[:：]\s*([\s\S]*)$/);
-      if (!match || !match[3].trim()) return element('pre', 'twsp-raw', raw);
+      return match && match[3].trim() ? { raw, time: match[1].trim(), place: match[2].trim(), event: match[3].trim() } : null;
+    }
+    function outlineCard(body) {
+      const parts = outlineParts(body);
+      if (!parts) return element('pre', 'twsp-raw', String(body ?? ''));
       const card = element('div', 'twsp-outline');
       const meta = element('div', 'twsp-outline-meta');
-      for (const [name, value, symbol] of [['时间', match[1], 'clock'], ['地点', match[2], 'pin']]) {
+      for (const [name, value, symbol] of [['时间', parts.time, 'clock'], ['地点', parts.place, 'pin']]) {
         const item = element('div', 'twsp-outline-meta-item');
         item.append(icon(element('span'), symbol), element('span', '', value.trim() || '未注明'));
         item.setAttribute('aria-label', `${name}：${value.trim() || '未注明'}`);
         meta.append(item);
       }
       const label = element('span', 'twsp-outline-event-label', '事件内容');
-      const event = element('p', 'twsp-outline-event', match[3].trim());
+      const event = element('p', 'twsp-outline-event', parts.event);
+      const eventBox = element('div', 'twsp-outline-event-box');
+      eventBox.append(label, event);
       const original = element('details');
-      original.append(element('summary', '', '查看原文'), element('pre', 'twsp-raw', raw));
-      card.append(meta, label, event, original);
+      original.append(element('summary', '', '查看原文'), element('pre', 'twsp-raw', parts.raw));
+      card.append(meta, eventBox, original);
       return card;
     }
     function field(label, name, type = 'text') {
@@ -1331,10 +1497,12 @@
     }
     const shell = element('div', 'twsp-shell');
     const header = element('header', 'twsp-head');
-    const title = element('h2', 'twsp-title', options.version ? `剧情规划器 ${options.version}` : '剧情规划器');
+    const title = element('h2', 'twsp-title', '剧情规划器');
     title.id = 'tw-story-planner-title-v1';
     const brand = element('div', 'twsp-brand');
-    brand.append(title, element('small', 'twsp-head-subtitle', '让故事的下一步更清晰'));
+    const brandText = element('div');
+    brandText.append(title, element('small', 'twsp-head-subtitle', '让故事的下一步更清晰'));
+    brand.append(inlineIcon('sparkle', 'twsp-brand-mark'), brandText);
     const closeButton = button('×', 'close', 'twsp-close');
     closeButton.setAttribute('aria-label', '关闭剧情规划器');
     const toggleEnabledButton = button('开启规划器', 'toggleEnabled', 'twsp-button twsp-activation');
@@ -1348,14 +1516,17 @@
     resultTab.setAttribute('role', 'tab');
     settingsTab.setAttribute('role', 'tab');
     presetsTab.setAttribute('role', 'tab');
-    tabs.append(resultTab, settingsTab, presetsTab);
+    for (const [tab, label, symbol] of [[resultTab, '规划结果', 'notebook'], [presetsTab, '预设', 'layers'], [settingsTab, '设置', 'sliders']]) {
+      tab.replaceChildren(inlineIcon(symbol), element('span', '', label));
+    }
+    tabs.append(resultTab, presetsTab, settingsTab);
     const resultPanel = element('section', 'twsp-panel');
     resultPanel.setAttribute('role', 'tabpanel');
     resultPanel.id = 'twsp-result-panel';
     resultTab.setAttribute('aria-controls', resultPanel.id);
     const resultHeading = element('div', 'twsp-page-heading');
     const resultHeadingText = element('div');
-    resultHeadingText.append(element('h3', 'twsp-page-title', '规划结果'), element('p', 'twsp-page-description', '当前细纲与本聊天的规划记录'));
+    resultHeadingText.append(element('span', 'twsp-eyebrow', 'STORY OUTLINE'), element('h3', 'twsp-page-title', '规划结果'), element('p', 'twsp-page-description', '当前细纲与本聊天的规划记录'));
     const statusLine = element('div', 'twsp-statusline');
     const statusBadge = mark(element('span', 'twsp-badge'), 'view', 'status');
     statusBadge.setAttribute('role', 'status');
@@ -1364,22 +1535,36 @@
     statusLine.append(statusBadge, updatedAt, activationHint);
     const outlineBody = mark(element('div', 'twsp-result-card'), 'view', 'outlineBody');
     const historyList = mark(element('div', 'twsp-history'), 'view', 'outlineHistory');
+    const historyHeading = element('div', 'twsp-list-heading');
+    const historyTitle = element('h4', '', '历史记录');
+    const historyCount = element('span', 'twsp-hint');
+    historyHeading.append(historyTitle, historyCount);
     const taskStatus = mark(element('p', 'twsp-hint'), 'view', 'planningTask');
     let historyStamp = null;
+    let featureStamp = null;
     const resultError = mark(element('p', 'twsp-error'), 'view', 'error');
     resultError.setAttribute('role', 'alert');
     const runButton = button('立即规划', 'run', 'twsp-button twsp-button--primary');
     resultHeading.append(resultHeadingText, runButton);
     const retrySaveButton = button('重试保存细纲', 'retrySave');
-    resultPanel.append(resultHeading, statusLine, taskStatus, historyList, outlineBody, resultError, retrySaveButton);
+    resultPanel.append(resultHeading, taskStatus, statusLine, outlineBody, historyHeading, historyList, resultError, retrySaveButton);
     const settingsPanel = element('section', 'twsp-panel');
     settingsPanel.setAttribute('role', 'tabpanel');
     settingsPanel.id = 'twsp-settings-panel';
     settingsTab.setAttribute('aria-controls', settingsPanel.id);
     const settingsHeading = element('div', 'twsp-page-heading');
     const settingsHeadingText = element('div');
-    settingsHeadingText.append(element('h3', 'twsp-page-title', '设置'), element('p', 'twsp-page-description', '连接模型并调整规划方式'));
+    settingsHeadingText.append(element('span', 'twsp-eyebrow', 'PREFERENCES'), element('h3', 'twsp-page-title', '设置'), element('p', 'twsp-page-description', '连接模型并调整规划方式'));
     settingsHeading.append(settingsHeadingText, element('span', 'twsp-version', options.version ? `v${options.version}` : ''));
+    const settingsStatus = element('div', 'twsp-settings-status');
+    const settingsStatusText = element('div');
+    settingsStatusText.append(element('span', 'twsp-card-caption', '规划器状态'), element('strong', '', '让规划器在回复前准备细纲'));
+    const settingsSwitch = element('label', 'twsp-settings-switch');
+    const settingsEnabledInput = mark(element('input'), 'field', 'settingsEnabled');
+    settingsEnabledInput.type = 'checkbox';
+    settingsEnabledInput.setAttribute('aria-label', '开启剧情规划器');
+    settingsSwitch.append(settingsEnabledInput, element('span', 'twsp-settings-switch-track'));
+    settingsStatus.append(settingsStatusText, settingsSwitch);
     const grid = element('div', 'twsp-grid');
     const apiurl = field('API 地址', 'apiurl', 'url');
     apiurl.wrapper.className += ' twsp-wide';
@@ -1410,9 +1595,10 @@
     temperature.input.min = '0'; temperature.input.max = '2'; temperature.input.step = '0.1';
     const parameterRow = element('div', 'twsp-grid twsp-advanced-grid');
     parameterRow.append(temperature.wrapper, maxTokens.wrapper);
-    grid.append(apiurl.wrapper, key.wrapper, modelRow, modelOptions, timeout.wrapper, retryCount.wrapper, parameterRow);
-    const advanced = element('details', 'twsp-advanced');
-    advanced.append(element('summary', '', '其他选项'));
+    grid.append(apiurl.wrapper, key.wrapper, modelRow, modelOptions);
+    const paramsGrid = element('div', 'twsp-grid twsp-params-grid');
+    paramsGrid.append(timeout.wrapper, retryCount.wrapper, parameterRow);
+    const advanced = element('div', 'twsp-advanced');
     const keyStatus = mark(element('p', 'twsp-hint'), 'view', 'keyStatus');
     const checkStatus = mark(element('p', 'twsp-hint'), 'view', 'checkStatus');
     checkStatus.setAttribute('role', 'status');
@@ -1425,16 +1611,32 @@
     const saveButton = button('保存配置', 'save', 'twsp-button twsp-button--primary');
     advancedActions.append(checkButton, clearKeyButton);
     advanced.append(advancedActions);
-    settingsActions.append(testButton, toolProbeButton, saveButton);
-    const connectionSection = element('section', 'twsp-settings-section');
-    connectionSection.append(element('h4', '', '连接配置'), grid);
-    settingsPanel.append(settingsHeading, connectionSection, advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), checkStatus, settingsActions);
+    settingsActions.append(saveButton);
+    function settingsSection(label, symbol, opened = false) {
+      const section = element('details', 'twsp-settings-section');
+      section.open = opened;
+      const summary = element('summary');
+      const heading = element('span', 'twsp-settings-section-title');
+      heading.append(inlineIcon(symbol), element('span', '', label));
+      summary.append(heading, inlineIcon('chevron', 'twsp-section-chevron'));
+      section.append(summary);
+      return section;
+    }
+    const connectionSection = settingsSection('连接配置', 'link', true);
+    connectionSection.append(grid);
+    const parametersSection = settingsSection('生成参数', 'sparkle');
+    parametersSection.append(paramsGrid);
+    const diagnosticsSection = settingsSection('连接与诊断', 'stethoscope');
+    const diagnosticActions = element('div', 'twsp-actions');
+    diagnosticActions.append(testButton, toolProbeButton);
+    diagnosticsSection.append(advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), diagnosticActions);
+    settingsPanel.append(settingsHeading, settingsStatus, connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
     const presetsPanel = element('section', 'twsp-panel');
     presetsPanel.id = 'twsp-presets-panel'; presetsPanel.setAttribute('role', 'tabpanel');
     presetsTab.setAttribute('aria-controls', presetsPanel.id);
     const presetsHeading = element('div', 'twsp-page-heading');
     const presetsHeadingText = element('div');
-    presetsHeadingText.append(element('h3', 'twsp-page-title', '预设'), element('p', 'twsp-page-description', '整理规划时使用的提示词'));
+    presetsHeadingText.append(element('span', 'twsp-eyebrow', 'WRITING PRESETS'), element('h3', 'twsp-page-title', '预设'), element('p', 'twsp-page-description', '整理规划时使用的提示词'));
     presetsHeading.append(presetsHeadingText);
     const presetSelect = mark(element('select', 'twsp-input'), 'field', 'presetSelect');
     presetSelect.hidden = true;
@@ -1453,27 +1655,27 @@
     const importPresetButton = button('导入预设', 'importPresetButton');
     const presetActions = element('div', 'twsp-actions twsp-preset-actions');
     const newPresetButton = button('新建', 'newPreset');
-    const deletePresetButton = button('删除', 'deletePreset');
-    const exportPresetButton = button('导出', 'exportPreset');
     const addPromptButton = button('新增 Prompt', 'addPrompt');
     const checkPresetButton = button('检查预设', 'checkPreset');
     const previewPresetButton = button('模拟发送预览', 'previewPreset');
     const copyCurrentPromptButton = button('复制提示词正文', 'copyCurrentPrompt');
     const savePresetButton = button('保存预设', 'savePreset', 'twsp-button twsp-button--primary');
     presetActions.append(checkPresetButton, previewPresetButton, copyCurrentPromptButton, savePresetButton);
+    newPresetButton.textContent = '＋ 新建预设';
+    newPresetButton.className = 'twsp-button twsp-button--primary';
+    presetsHeading.append(newPresetButton);
+    addPromptButton.textContent = '＋ 新增 Prompt';
     addPromptButton.className += ' twsp-add-prompt';
-    const presetToolbar = element('div', 'twsp-preset-toolbar');
-    const presetToolbarActions = element('div', 'twsp-preset-toolbar-actions');
-    presetToolbarActions.append(element('span', 'twsp-preset-kind', '剧情预设'), importPresetButton, newPresetButton);
-    const presetActiveStatus = mark(element('span', 'twsp-preset-active'), 'view', 'activePresetStatus');
-    presetToolbar.append(presetToolbarActions, presetActiveStatus);
+    const promptSectionHeading = element('div', 'twsp-list-heading twsp-prompt-list-heading');
+    promptSectionHeading.append(element('h4', '', '提示词'), addPromptButton);
     const presetSelectLabel = element('label', 'twsp-field');
     presetSelectLabel.className += ' twsp-preset-internal';
     presetSelectLabel.append(element('span', '', '当前预设'), presetSelect);
     presetSelectLabel.hidden = true;
     const importLabel = element('label', 'twsp-preset-import');
     importLabel.append(element('span', '', '导入 Chat Completion 预设 JSON'), importInput);
-    presetsPanel.append(presetsHeading, element('p', 'twsp-hint', '独立预设；温度与最大 token 以设置页为准。'), presetToolbar, presetSelectLabel, importLabel, presetCards, presetName.wrapper, presetCompatibility, presetRows, addPromptButton, presetActions, presetStatus, presetPreview);
+    presetsPanel.append(presetsHeading, presetCards, presetSelectLabel, importLabel, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
+      element('p', 'twsp-hint twsp-preset-footnote', '独立预设；温度与最大 token 以设置页为准。'));
     shell.append(header, tabs, resultPanel, settingsPanel, presetsPanel);
     root.append(style, shell);
     doc.body.append(root);
@@ -1562,23 +1764,41 @@
         presetCompatibility.append(element('p', '', `SPreset · ${spreset.summary}`));
         for (const diagnostic of spreset.diagnostics) presetCompatibility.append(element('p', '', diagnostic));
       }
-      for (const item of presetState.plannerPresets) {
+      let selectedStatus = null;
+      const countEnabledPrompts = preset => preset.promptOrder.filter(order => {
+        const prompt = preset.prompts.find(value => value.identifier === order.identifier);
+        return order.enabled !== false && prompt && prompt.enabled !== false;
+      }).length;
+      const orderedPresets = [presetDraft, ...presetState.plannerPresets.filter(item => item.id !== presetDraft.id)];
+      for (const item of orderedPresets) {
         const option = element('option', '', item.name); option.value = item.id; presetSelect.append(option);
         const card = element('article', 'twsp-preset-card');
-        card.dataset.selected = String(item.id === presetDraft.id);
-        const choose = button('✓', `selectPreset-${item.id}`, 'twsp-preset-select');
-        choose.setAttribute('aria-label', `选择预设 ${item.name}`);
-        choose.setAttribute('aria-pressed', String(item.id === presetDraft.id));
+        const selected = item.id === presetDraft.id;
+        card.dataset.selected = String(selected);
+        card.setAttribute('aria-current', String(selected));
+        const info = element('div', 'twsp-preset-card-info');
+        info.append(element('span', 'twsp-card-caption', selected ? '当前预设' : '其他预设'));
         const name = button(item.name, `presetCardName-${item.id}`, 'twsp-preset-card-name');
-        const kind = element('span', 'twsp-preset-kind', '剧情');
+        const enabledCount = countEnabledPrompts(item);
+        const status = element('small', 'twsp-preset-card-status', `${selected ? '当前使用' : '可切换'} · ${enabledCount} 条提示词已启用`);
+        if (selected) selectedStatus = status;
+        info.append(name, status);
+        const controls = element('div', 'twsp-preset-card-controls');
+        if (selected) controls.append(importPresetButton);
+        else {
+          const choose = button('切换', `selectPreset-${item.id}`);
+          choose.setAttribute('aria-label', `选择预设 ${item.name}`);
+          choose.addEventListener('click', () => selectPresetById(item.id));
+          controls.append(choose);
+        }
+        const manage = element('details', 'twsp-preset-manage');
+        const manageSummary = element('summary', '', '管理');
+        manageSummary.setAttribute('aria-label', `管理预设 ${item.name}`);
         const actions = element('div', 'twsp-preset-card-actions');
-        const exportCard = icon(button('⇩', `exportPreset-${item.id}`, 'twsp-prompt-icon'), 'download');
-        exportCard.setAttribute('aria-label', `导出预设 ${item.name}`);
-        const editCard = icon(button('✎', `editPreset-${item.id}`, 'twsp-prompt-icon'), 'pencil');
-        editCard.setAttribute('aria-label', `编辑预设 ${item.name}`);
-        const deleteCard = icon(button('⌫', `deletePreset-${item.id}`, 'twsp-prompt-icon'), 'trash');
-        deleteCard.setAttribute('aria-label', `删除预设 ${item.name}`);
-        for (const node of [choose, name]) node.addEventListener('click', () => selectPresetById(item.id));
+        const exportCard = button('导出', `exportPreset-${item.id}`, 'twsp-preset-menu-action');
+        const editCard = button('重命名', `editPreset-${item.id}`, 'twsp-preset-menu-action');
+        const deleteCard = button('删除', `deletePreset-${item.id}`, 'twsp-preset-menu-action twsp-danger');
+        name.addEventListener('click', () => selectPresetById(item.id));
         exportCard.addEventListener('click', () => downloadPreset(item));
         editCard.addEventListener('click', () => {
           if (item.id !== presetDraft.id && !selectPresetById(item.id)) return;
@@ -1586,10 +1806,11 @@
         });
         deleteCard.addEventListener('click', () => deletePresetById(item.id));
         actions.append(exportCard, editCard, deleteCard);
-        card.append(choose, name, kind, actions); presetCards.append(card);
+        manage.append(manageSummary, actions);
+        controls.append(manage);
+        card.append(info, controls); presetCards.append(card);
       }
       presetSelect.value = presetDraft.id;
-      presetActiveStatus.textContent = `剧情：${presetDraft.name}`;
       presetName.input.value = presetDraft.name;
       presetRows.replaceChildren();
       if (!presetDraft.promptOrder.length) {
@@ -1613,7 +1834,7 @@
           markPresetDirty(); renderPresetEditor();
         });
         const head = element('div', 'twsp-prompt-head');
-        const drag = mark(element('span', 'twsp-prompt-drag', '⋮⋮'), 'action', 'drag-' + prompt.identifier);
+        const drag = mark(inlineIcon('grip', 'twsp-prompt-drag'), 'action', 'drag-' + prompt.identifier);
         drag.draggable = true;
         drag.setAttribute('aria-label', `拖动排序 ${prompt.name ?? prompt.identifier}`);
         drag.addEventListener('dragstart', event => { draggingPromptId = prompt.identifier; event.dataTransfer?.setData('text/plain', prompt.identifier); });
@@ -1625,25 +1846,31 @@
         const enabledInput = mark(element('input'), 'field', 'promptEnabled-' + prompt.identifier);
         enabledInput.type = 'checkbox'; enabledInput.checked = effectiveEnabled;
         enabledInput.setAttribute('aria-label', `启用 ${prompt.name ?? prompt.identifier}`);
+        const enabledText = element('span', 'twsp-prompt-enabled-text', effectiveEnabled ? '已启用' : '已停用');
         enabledInput.addEventListener('change', () => {
           item.enabled = enabledInput.checked; prompt.enabled = enabledInput.checked;
+          enabledText.textContent = enabledInput.checked ? '已启用' : '已停用';
+          if (selectedStatus) selectedStatus.textContent = `当前使用 · ${countEnabledPrompts(presetDraft)} 条提示词已启用`;
           row.dataset.enabled = String(enabledInput.checked); markPresetDirty();
         });
-        enabledRow.append(enabledInput);
-        const size = element('span', 'twsp-prompt-size', String((prompt.content ?? '').length));
+        enabledRow.append(enabledInput, enabledText);
+        const size = element('span', 'twsp-prompt-size', `${(prompt.content ?? '').length} 字符`);
         size.setAttribute('title', '正文字符数');
-        const edit = icon(button('✎', `edit-${prompt.identifier}`, 'twsp-prompt-icon'), 'pencil');
-        edit.setAttribute('aria-label', `编辑 ${prompt.name ?? prompt.identifier}`);
+        const edit = icon(button('展开', `edit-${prompt.identifier}`, 'twsp-prompt-icon twsp-prompt-expand'), 'chevron');
+        edit.setAttribute('aria-label', `展开编辑 ${prompt.name ?? prompt.identifier}`);
         edit.setAttribute('aria-expanded', String(expandedPromptIds.has(prompt.identifier)));
+        row.dataset.expanded = String(expandedPromptIds.has(prompt.identifier));
+        const headingText = element('div', 'twsp-prompt-heading-text');
+        const subtitle = element('div', 'twsp-prompt-subtitle');
+        subtitle.append(badge, size);
+        headingText.append(title, subtitle);
         const meta = element('div', 'twsp-prompt-meta');
-        meta.append(badge, enabledRow, size, edit);
+        meta.append(enabledRow, edit);
         let remove = null;
         if (!prompt.marker) {
-          remove = icon(button('⌫', `remove-${prompt.identifier}`, 'twsp-prompt-icon'), 'trash');
-          remove.setAttribute('aria-label', `删除 ${prompt.name ?? prompt.identifier}`);
-          meta.append(remove);
-        } else meta.append(element('span'));
-        head.append(drag, title, meta);
+          remove = button('删除提示词', `remove-${prompt.identifier}`, 'twsp-button twsp-button--danger');
+        }
+        head.append(drag, headingText, meta);
         const editor = mark(element('div', 'twsp-prompt-editor'), 'view', 'promptEditor-' + prompt.identifier);
         editor.hidden = !expandedPromptIds.has(prompt.identifier);
         const identityFields = element('div', 'twsp-prompt-fields');
@@ -1685,7 +1912,7 @@
         body.className += ' twsp-prompt-content';
         body.readOnly = prompt.marker === true;
         body.addEventListener('input', () => {
-          prompt.content = body.value; size.textContent = String(body.value.length); markPresetDirty();
+          prompt.content = body.value; size.textContent = `${body.value.length} 字符`; markPresetDirty();
         });
         bodyField.append(body);
         const promptOrder = field('排序', 'promptOrder-' + prompt.identifier, 'number');
@@ -1725,7 +1952,10 @@
           makeFlag('禁止覆盖', 'forbidOverrides', prompt.forbid_overrides === true),
           makeFlag('Marker（运行时条目）', 'marker', prompt.marker === true, true));
         if (body.readOnly) editor.append(element('p', 'twsp-prompt-hint', '此 Prompt 内容由运行时生成'));
-        editor.append(identityFields, positionFields, bodyField, advancedButton, advancedGrid);
+        const editorActions = element('div', 'twsp-prompt-editor-actions');
+        editorActions.append(advancedButton);
+        if (remove) editorActions.append(remove);
+        editor.append(identityFields, positionFields, bodyField, editorActions, advancedGrid);
         if (remove) remove.addEventListener('click', () => {
           presetDraft.promptOrder = presetDraft.promptOrder.filter(value => value !== item);
           presetDraft.prompts = presetDraft.prompts.filter(value => value !== prompt);
@@ -1736,6 +1966,8 @@
           editor.hidden = !editor.hidden;
           if (editor.hidden) expandedPromptIds.delete(prompt.identifier); else expandedPromptIds.add(prompt.identifier);
           edit.setAttribute('aria-expanded', String(!editor.hidden));
+          edit.setAttribute('aria-label', `${editor.hidden ? '展开编辑' : '收起编辑'} ${prompt.name ?? prompt.identifier}`);
+          row.dataset.expanded = String(!editor.hidden);
         };
         edit.addEventListener('click', toggleEditor); title.addEventListener('click', toggleEditor);
         row.append(head, editor); presetRows.append(row);
@@ -1755,28 +1987,50 @@
     }
     function render(syncFields = false) {
       const view = options.getViewModel();
-      toggleEnabledButton.textContent = view.config.enabled ? '规划器已开启 · 点击关闭' : '开启规划器';
+      toggleEnabledButton.textContent = view.config.enabled ? '规划器已开启' : '开启规划器';
       toggleEnabledButton.dataset.enabled = String(view.config.enabled);
       toggleEnabledButton.setAttribute('aria-pressed', String(view.config.enabled));
       toggleEnabledButton.setAttribute('aria-label', view.config.enabled ? '关闭剧情规划器' : '开启剧情规划器');
+      settingsEnabledInput.checked = view.config.enabled;
       statusBadge.textContent = view.statusLabel;
       statusBadge.dataset.status = view.status;
       activationHint.textContent = view.activationHint ?? '';
       updatedAt.textContent = view.updatedAt ? `更新：${view.updatedAt}` : '尚无规划记录';
-      outlineBody.replaceChildren(outlineCard(view.outlineBody));
       const history = view.outlineHistory ?? [];
-      outlineBody.hidden = history.length > 0 || !view.outlineBody;
+      const available = history.filter(record => record.body);
+      const currentRecord = available.findLast(record => ['ready', 'using'].includes(record.status)) ?? available.at(-1) ?? null;
+      const shownBody = currentRecord?.body ?? view.outlineBody;
+      const labels = { ready: '待使用', using: '本轮使用中', used: '已使用', invalid: '已失效', superseded: '已替换' };
+      outlineBody.hidden = !shownBody;
+      statusLine.hidden = Boolean(shownBody);
+      const nextFeatureStamp = shownBody ? JSON.stringify([currentRecord?.id, currentRecord?.status, currentRecord?.sourceMessageId, currentRecord?.createdAt, view.statusLabel, view.updatedAt, shownBody]) : null;
+      if (shownBody && nextFeatureStamp !== featureStamp) {
+        const featureTop = element('div', 'twsp-result-top');
+        featureTop.append(element('span', 'twsp-result-state', currentRecord ? labels[currentRecord.status] ?? currentRecord.status : view.statusLabel),
+          element('span', 'twsp-result-source', currentRecord?.sourceMessageId == null ? (view.updatedAt ? `更新：${view.updatedAt}` : '') : `来源楼层 ${currentRecord.sourceMessageId}${currentRecord.createdAt ? ` · ${currentRecord.createdAt}` : ''}`));
+        outlineBody.replaceChildren(featureTop, outlineCard(shownBody));
+      } else if (!shownBody && featureStamp !== null) outlineBody.replaceChildren();
+      featureStamp = nextFeatureStamp;
+      const olderHistory = history.filter(record => record !== currentRecord);
+      historyHeading.hidden = olderHistory.length === 0;
+      historyCount.textContent = `${olderHistory.length} 条记录`;
       const nextStamp = JSON.stringify(history);
       if (nextStamp !== historyStamp) {
         const expanded = new Set(Array.from(historyList.children).filter(item => item.open).map(item => item.dataset.recordId));
-        const entries = history.map((record, index) => {
+        const entries = olderHistory.map(record => {
           const item = element('details', 'twsp-history-entry');
           item.dataset.recordId = record.id;
-          item.open = expanded.has(record.id) || index === history.length - 1;
-          const labels = { ready: '待使用', using: '本轮使用中', used: '已使用', invalid: '已失效', superseded: '已替换' };
+          item.open = expanded.has(record.id);
           const source = record.sourceMessageId == null ? '来源楼层未知' : `来源 #${record.sourceMessageId}`;
           const used = record.usedMessageId == null ? '使用楼层待确认' : `用于 #${record.usedMessageId}`;
-          item.append(element('summary', '', `细纲 ${record.sequence} · ${source} → ${used} · ${labels[record.status] ?? record.status}`),
+          const parts = outlineParts(record.body);
+          const summary = element('summary', 'twsp-history-summary');
+          const main = element('span', 'twsp-history-main');
+          main.append(element('strong', '', parts ? [parts.place, parts.time].filter(Boolean).join(' · ') || `细纲 ${record.sequence}` : `细纲 ${record.sequence}`),
+            element('small', '', `${parts ? `事件内容：${parts.event.slice(0, 45)}${parts.event.length > 45 ? '…' : ''} · ` : ''}${source} → ${used}`));
+          summary.append(element('span', 'twsp-history-number', String(record.sequence ?? '').padStart(2, '0')), main,
+            element('span', 'twsp-history-state', labels[record.status] ?? record.status), inlineIcon('chevron', 'twsp-history-chevron'));
+          item.append(summary,
             element('p', 'twsp-hint', `${record.purpose === 'initial' ? '初始规划' : record.purpose === 'legacy' ? '旧版本记录' : '下一轮规划'} · ${record.createdAt ?? ''}${record.invalidReason ? ` · ${record.invalidReason}` : ''}`),
             outlineCard(record.body));
           return item;
@@ -1831,7 +2085,12 @@
     resultTab.addEventListener('click', () => showTab('result'));
     settingsTab.addEventListener('click', () => showTab('settings'));
     presetsTab.addEventListener('click', () => showTab('presets'));
-    presetName.input.addEventListener('input', () => { presetDraft.name = presetName.input.value; presetActiveStatus.textContent = `剧情：${presetDraft.name}`; markPresetDirty(); });
+    presetName.input.addEventListener('input', () => {
+      presetDraft.name = presetName.input.value;
+      const visibleName = presetCards.querySelector(`[data-tw-action="presetCardName-${presetDraft.id}"]`);
+      if (visibleName) visibleName.textContent = presetDraft.name;
+      markPresetDirty();
+    });
     presetSelect.addEventListener('change', () => { if (!selectPresetById(presetSelect.value)) presetSelect.value = presetDraft.id; });
     importPresetButton.addEventListener('click', () => importInput.click?.());
     newPresetButton.addEventListener('click', () => {
@@ -1841,7 +2100,6 @@
       presetDraft.name = '新剧情预设'; presetState.plannerPresets.push(presetDraft);
       presetState.activePlannerPresetId = presetDraft.id; markPresetDirty(); renderPresetEditor();
     });
-    deletePresetButton.addEventListener('click', () => deletePresetById(presetDraft.id));
     addPromptButton.addEventListener('click', () => {
       const identifier = `custom-${fnv1a(`${Date.now()}-${Math.random()}`)}`;
       presetDraft.prompts.push({ identifier, name: '新提示词', role: 'system', content: '', enabled: true,
@@ -1878,7 +2136,6 @@
         ? `成功导入 ${importedPresets.length} 个预设。${errors.length ? `失败 ${errors.length} 个：${errors.join('；')}` : ''}`
         : errors.length ? `导入失败：${errors.join('；')}` : '';
     });
-    exportPresetButton.addEventListener('click', () => downloadPreset(presetDraft));
     savePresetButton.addEventListener('click', () => {
       try {
         presetState = options.savePresetState({ ...presetState, activePlannerPresetId: presetDraft.id });
@@ -1937,12 +2194,15 @@
       }
     });
     modelOptions.addEventListener('change', () => { if (modelOptions.value) model.input.value = modelOptions.value; });
-    for (const tab of [resultTab, settingsTab, presetsTab]) tab.addEventListener('keydown', event => {
+    const tabOrder = [['result', resultTab], ['presets', presetsTab], ['settings', settingsTab]];
+    for (const [, tab] of tabOrder) tab.addEventListener('keydown', event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
         event.preventDefault();
-        const next = activeTab === 'result' ? 'settings' : 'result';
-        showTab(event.key === 'Home' ? 'result' : event.key === 'End' ? 'settings' : next);
-        (activeTab === 'result' ? resultTab : settingsTab).focus?.();
+        const index = tabOrder.findIndex(([name]) => name === activeTab);
+        const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabOrder.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabOrder.length) % tabOrder.length;
+        showTab(tabOrder[nextIndex][0]);
+        tabOrder[nextIndex][1].focus?.();
       }
     });
     closeButton.addEventListener('click', close);
@@ -2044,6 +2304,7 @@
       render(false);
       await confirmConfigSave();
     });
+    settingsEnabledInput.addEventListener('change', () => toggleEnabledButton.click());
     retrySaveButton.addEventListener('click', async () => {
       retrySaveButton.disabled = true;
       try { await options.retryPersist?.(); }

@@ -1,17 +1,17 @@
-# 剧情规划器 SillyTavern 扩展 0.1.1
+# 剧情规划器 SillyTavern 扩展 0.1.2
 
 仓库默认分支 `main` 的根目录直接包含可安装扩展的 manifest、入口和模块。扩展依赖 SillyTavern 原生扩展上下文，不需要 Tavern Helper / JS-Slash-Runner。完整功能与诊断说明见 [README](README.md)。
 
 ## 安装
 
-1. 在 SillyTavern 的“扩展 → 安装扩展”中，Git URL 填 `https://github.com/yu555-ux/yaoqi2`。
+1. 在 SillyTavern 的“扩展 → 安装扩展”中，Git URL 填 `https://github.com/yu555-ux/story-planner`。
 2. Branch or tag name 留空，即安装默认分支 `main`。
 3. 点击“Install just for me”或“Install for all users”，安装并启用“剧情规划器”，然后刷新页面。
 4. 点击聊天输入框旁的魔法棒，在菜单中选择“剧情规划器”。在“设置”页填写独立规划 API 的 OpenAI 兼容基址、密钥和模型，再导入规划预设。
 5. 点击面板顶部的“开启规划器”按钮。按钮会立即保存开关状态；设置页和浏览器控制台日志会显示是否开启，以及未调用 API 的配置原因。
 6. 新聊天已有角色开场白（0 楼）时，发送第一条玩家消息（1 楼）。插件会先生成细纲，成功后才允许酒馆生成首次回复（2 楼）。
 
-已经通过 `sillytavern-extension` 安装的用户，在扩展管理器直接更新并刷新页面即可；旧分支仍发布相同版本。Git 更新跟随现有分支，不会自动切换到 `main`。新装或重装只需要 URL；重装前导出规划预设并备份 API 配置。更新并刷新后，设置页应显示 `v0.1.1`。
+从本仓库 `main` 安装的用户，可在扩展管理器直接更新并刷新页面。若旧安装指向其他仓库或分支，Git 更新不会自动切换来源；请先导出规划预设、备份 API 配置，再用上述地址重新安装。更新并刷新后，设置页应显示 `v0.1.2`。
 
 也可以手动安装：将仓库检出到 `data/<用户>/extensions/tw-story-planner-v1/`，或 `public/scripts/extensions/third-party/tw-story-planner-v1/`，然后重启 SillyTavern。Git URL 安装器接收仓库和分支，不接收 GitHub 的仓库子目录链接。
 

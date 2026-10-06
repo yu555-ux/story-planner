@@ -7,9 +7,9 @@ const require = createRequire(import.meta.url);
 const engine = require('./planner.js');
 const adapter = require('./runtime-adapter.js');
 
-test('0.1.1 release version matches manifest, adapter and panel title', () => {
+test('release version matches manifest, adapter and settings badge', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.1');
+  assert.equal(manifest.version, '0.1.2');
   assert.equal(adapter.VERSION, manifest.version);
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);
@@ -21,8 +21,10 @@ test('0.1.1 release version matches manifest, adapter and panel title', () => {
   });
   const nodes = [...document.body.children];
   let title;
-  while (nodes.length) { const node = nodes.shift(); if (node.className === 'twsp-title') title = node; nodes.push(...node.children); }
-  assert.equal(title?.textContent, '剧情规划器 0.1.1');
+  let badge;
+  while (nodes.length) { const node = nodes.shift(); if (node.className === 'twsp-title') title = node; if (node.className === 'twsp-version') badge = node; nodes.push(...node.children); }
+  assert.equal(title?.textContent, '剧情规划器');
+  assert.equal(badge?.textContent, `v${manifest.version}`);
   panel.destroy();
 });
 
@@ -37,6 +39,7 @@ class Element {
   removeAttribute(name) { delete this.attributes[name]; }
   addEventListener(name, handler) { this.listeners.set(name, handler); }
   dispatch(name) { return this.listeners.get(name)?.({ target: this, preventDefault() {} }); }
+  click() { return this.dispatch('click'); }
   showModal() { this.open = true; }
   close() { this.open = false; }
   remove() { this.parentNode.children = this.parentNode.children.filter(child => child !== this); }
@@ -74,7 +77,13 @@ test('prominent activation button persists immediately and logs each state', () 
   assert.equal(button.attributes['aria-pressed'], 'true');
   button.dispatch('click');
   assert.equal(config.enabled, false);
-  assert.deepEqual(logs, ['已开启', '已关闭']);
+  const nodes = [...document.body.children];
+  for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
+  const settingsToggle = nodes.find(node => node.dataset.twField === 'settingsEnabled');
+  settingsToggle.checked = true;
+  settingsToggle.dispatch('change');
+  assert.equal(config.enabled, true);
+  assert.deepEqual(logs, ['已开启', '已关闭', '已开启']);
   panel.destroy();
 });
 
@@ -96,10 +105,13 @@ test('result page renders ordered floor history as safe outline text and exposes
   const nodes = [];
   while (queue.length) { const node = queue.shift(); nodes.push(node); queue.push(...node.children); }
   const list = nodes.find(node => node.dataset.twView === 'outlineHistory');
-  assert.equal(list.children.length, 2);
-  assert.match(list.children[0].children[0].textContent, /来源 #1 → 用于 #2/);
+  assert.equal(list.children.length, 1);
+  const summary = list.children[0].children[0];
+  assert.match(summary.children[1].children[1].textContent, /来源 #1 → 用于 #2/);
   assert.equal(list.children[0].children.at(-1).textContent, '<script>保留原文</script>');
-  assert.match(list.children[1].children[0].textContent, /使用楼层待确认/);
+  const current = nodes.find(node => node.dataset.twView === 'outlineBody');
+  assert.equal(current.children.at(-1).textContent, '下一轮内容');
+  assert.match(current.children[0].children[1].textContent, /来源楼层 2/);
   assert.equal(nodes.find(node => node.dataset.twField === 'retryCount').value, '3');
   panel.destroy();
 });
@@ -121,6 +133,12 @@ test('outline card gives event content priority and uses SVG icons for time and 
   assert.equal(nodes.find(node => node.className === 'twsp-outline-event')?.textContent, '林澈发现遗失的信件。');
   assert.equal(nodes.filter(node => node.className === 'twsp-outline-meta-item').length, 2);
   assert.equal(nodes.filter(node => node.tagName === 'svg' && node.attributes['aria-hidden'] === 'true').length >= 2, true);
+  const feature = nodes.find(node => node.dataset.twView === 'outlineBody');
+  const rawDetails = feature.children[1].children.at(-1);
+  rawDetails.open = true;
+  panel.render(false);
+  assert.equal(feature.children[1].children.at(-1), rawDetails);
+  assert.equal(rawDetails.open, true);
   panel.destroy();
 });
 
@@ -151,6 +169,39 @@ test('settings UI states whether the host confirmed the save', async () => {
   assert.match(checkStatus.textContent, /保存已确认/);
   await save.dispatch('click');
   assert.match(checkStatus.textContent, /尚无落盘确认/);
+  panel.destroy();
+});
+
+test('preset cards keep selection, editing, enable and management controls available', () => {
+  const document = { createElement: tag => new Element(tag, document), body: null };
+  document.body = new Element('body', document);
+  const preset = engine.createDefaultPlannerPreset();
+  preset.prompts.push({ identifier: 'intro', name: '规划器身份', role: 'system', content: '剧情规则', enabled: true });
+  preset.promptOrder.push({ identifier: 'intro', enabled: true });
+  const panel = engine.createPlannerPanel({
+    document,
+    getViewModel: () => ({ config: { enabled: true }, status: 'idle', configErrors: {} }),
+    getPresetState: () => ({ plannerPresets: [preset], activePlannerPresetId: preset.id }),
+    setInterval: () => 1, clearInterval() {},
+  });
+  panel.open();
+  const root = document.body.children[0];
+  for (const action of ['newPreset', 'importPresetButton', `exportPreset-${preset.id}`, `editPreset-${preset.id}`, `deletePreset-${preset.id}`, 'addPrompt', 'checkPreset', 'previewPreset', 'copyCurrentPrompt', 'savePreset']) {
+    assert.ok(root.querySelector(`[data-tw-action="${action}"]`), `${action} remains available`);
+  }
+  const title = root.querySelector('[data-tw-action="title-intro"]');
+  const editor = root.querySelector('[data-tw-action="edit-intro"]');
+  assert.ok(title && editor);
+  title.dispatch('click');
+  assert.equal(editor.attributes['aria-expanded'], 'true');
+  assert.ok(root.querySelector('[data-tw-action="remove-intro"]'));
+  const queue = [...root.children];
+  for (let i = 0; i < queue.length; i++) queue.push(...queue[i].children);
+  const enabled = queue.find(node => node.dataset.twField === 'promptEnabled-intro');
+  const card = queue.find(node => node.dataset.twView === 'promptCard-intro');
+  enabled.checked = false;
+  enabled.dispatch('change');
+  assert.equal(card.dataset.enabled, 'false');
   panel.destroy();
 });
 
