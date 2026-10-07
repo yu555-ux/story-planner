@@ -67,6 +67,32 @@ test('initial planning failure aborts the native SillyTavern generation', async 
   gate.destroy();
 });
 
+test('chat switch while foreground planning is pending prevents stale prompt injection', async () => {
+  const { context, listeners } = makeContext();
+  let chatIdentity = 'chat-a';
+  let resolveOutline;
+  const runtime = { gate: {
+    isEnabled: () => true,
+    getCurrentTurn: () => ({ kind: 'normal', chatIdentity, userMessageId: 3 }),
+    ensureCurrentOutline: () => new Promise(resolve => { resolveOutline = resolve; }),
+    getActiveOutline: () => null,
+    getChatIdentity: () => chatIdentity,
+  } };
+  const gate = createGenerationGate(runtime, context, { notify() {} });
+  let aborted = false;
+  const pending = gate.interceptor([], 2048, immediate => { aborted = immediate; }, 'normal');
+  await new Promise(resolve => setImmediate(resolve));
+  chatIdentity = 'chat-b';
+  listeners.get('chat_changed')?.();
+  resolveOutline({ id: 'old-chat-outline', fullTag: '<outline>旧聊天细纲</outline>' });
+  await pending;
+  const prompt = { chat: [{ role: 'user', content: '新聊天输入' }], dryRun: false };
+  listeners.get('prompt_ready')(prompt);
+  assert.equal(aborted, true);
+  assert.equal(prompt.chat.length, 1);
+  gate.destroy();
+});
+
 test('disabled gate records why it did not call the planning API', async () => {
   const { context } = makeContext();
   const logs = [];

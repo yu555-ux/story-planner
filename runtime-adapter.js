@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.1.10';
+  const VERSION = '0.2.0';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);
@@ -21,10 +21,13 @@
     if (typeof context?.eventSource?.on !== 'function') missing.push('context.eventSource.on');
     if (!eventTypes || typeof eventTypes !== 'object') missing.push('context.eventTypes');
     for (const eventName of [
-      'CHAT_COMPLETION_PROMPT_READY', 'MESSAGE_RECEIVED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED',
+      'CHAT_COMPLETION_PROMPT_READY', 'MESSAGE_RECEIVED', 'MESSAGE_SWIPED',
       'MESSAGE_DELETED', 'CHAT_CHANGED', 'GENERATION_STARTED', 'GENERATION_ENDED', 'GENERATION_STOPPED',
     ]) {
       if (typeof eventTypes?.[eventName] !== 'string') missing.push(`eventTypes.${eventName}`);
+    }
+    if (typeof eventTypes?.MESSAGE_UPDATED !== 'string' && typeof eventTypes?.MESSAGE_EDITED !== 'string') {
+      missing.push('eventTypes.MESSAGE_UPDATED or eventTypes.MESSAGE_EDITED');
     }
     if (bridge) {
       const ready = bridge.ready ?? window?.__TAURITAVERN_MAIN_READY__;
@@ -44,6 +47,54 @@
       hash = Math.imul(hash, 0x01000193) >>> 0;
     }
     return hash.toString(16).padStart(8, '0');
+  }
+
+  const volatileMessageKeys = new Set([
+    'created_at', 'createdAt', 'date', 'sent_at', 'sentAt', 'timestamp', 'updated_at', 'updatedAt',
+    'swipe_id', 'swipeId', 'swipes', 'message_id', 'messageId',
+  ]);
+
+  function stablePromptValue(value) {
+    if (Array.isArray(value)) return value.map(stablePromptValue);
+    if (!value || typeof value !== 'object') return value ?? null;
+    return Object.fromEntries(Object.keys(value).sort()
+      .filter(key => !volatileMessageKeys.has(key))
+      .map(key => [key, stablePromptValue(value[key])]));
+  }
+
+  function strongFingerprint(value) {
+    const serialized = JSON.stringify(stablePromptValue(value));
+    return `fnv1a64-${fnv1a(`a:${serialized}`)}${fnv1a(`b:${serialized}`)}`;
+  }
+
+  function messageBody(message) {
+    const swipes = Array.isArray(message?.swipes) ? message.swipes : null;
+    const swipeId = message?.swipe_id ?? message?.swipeId;
+    const selectedSwipe = swipes && Number.isInteger(swipeId) ? swipes[swipeId] : null;
+    if (selectedSwipe != null) {
+      if (typeof selectedSwipe === 'string') return selectedSwipe;
+      if (typeof selectedSwipe === 'object') return selectedSwipe.mes ?? selectedSwipe.message ?? selectedSwipe.content ?? selectedSwipe.text ?? '';
+    }
+    return message?.mes ?? message?.message ?? message?.content ?? '';
+  }
+
+  function messageText(value) {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(part => {
+      if (typeof part === 'string') return part;
+      return typeof part?.text === 'string' ? part.text : '';
+    }).join('');
+    return '';
+  }
+
+  function promptAttachments(message) {
+    const extra = message?.extra && typeof message.extra === 'object' ? message.extra : {};
+    return {
+      attachments: message?.attachments ?? extra.attachments ?? null,
+      audio: message?.audio ?? message?.audio_url ?? extra.audio ?? extra.audio_url ?? null,
+      image: message?.image ?? message?.images ?? extra.image ?? extra.images ?? null,
+      video: message?.video ?? message?.video_url ?? extra.video ?? extra.video_url ?? null,
+    };
   }
 
   function messageTextLength(content) {
@@ -337,7 +388,8 @@
       tavern_events: {
         MESSAGE_RECEIVED: eventTypes.MESSAGE_RECEIVED,
         MESSAGE_SWIPED: eventTypes.MESSAGE_SWIPED,
-        MESSAGE_UPDATED: eventTypes.MESSAGE_UPDATED,
+        MESSAGE_UPDATED: eventTypes.MESSAGE_UPDATED ?? eventTypes.MESSAGE_EDITED,
+        ...(typeof eventTypes.MESSAGE_EDITED === 'string' ? { MESSAGE_EDITED: eventTypes.MESSAGE_EDITED } : {}),
         MESSAGE_DELETED: eventTypes.MESSAGE_DELETED,
         CHAT_CHANGED: eventTypes.CHAT_CHANGED,
         GENERATION_STARTED: eventTypes.GENERATION_STARTED,
@@ -353,10 +405,23 @@
         return liveContext().chat.slice(start, end + 1).map((message, offset) => {
           const explicitRole = typeof message?.role === 'string' ? message.role : null;
           const role = explicitRole ?? (message?.is_user ? 'user' : message?.is_system ? 'system' : 'assistant');
+          const selectedBody = messageBody(message);
+          const attachments = promptAttachments(message);
+          const identity = {
+            role,
+            content: selectedBody,
+            attachments,
+            name: message?.name ?? null,
+            toolCalls: message?.tool_calls ?? null,
+            toolCallId: message?.tool_call_id ?? null,
+          };
+          const inputIdentity = { role, content: selectedBody, attachments, name: message?.name ?? null };
           return {
             message_id: start + offset,
             role,
-            message: String(message?.mes ?? message?.message ?? message?.content ?? ''),
+            message: messageText(selectedBody),
+            message_fingerprint: strongFingerprint(identity),
+            input_fingerprint: strongFingerprint(inputIdentity),
             is_hidden: message?.is_hidden === true || message?.extra?.is_hidden === true
               || (role !== 'tool' && message?.is_system === true),
             ...(Array.isArray(message?.tool_calls) ? { tool_calls: clone(message.tool_calls) } : {}),

@@ -9,7 +9,7 @@ const { createGenerationGate } = require('./generation-gate.js');
 
 const eventNames = [
   'APP_READY', 'CHAT_COMPLETION_PROMPT_READY', 'MESSAGE_RECEIVED', 'MESSAGE_SWIPED',
-  'MESSAGE_UPDATED', 'MESSAGE_DELETED', 'CHAT_CHANGED', 'GENERATION_STARTED',
+  'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'CHAT_CHANGED', 'GENERATION_STARTED',
   'GENERATION_ENDED', 'GENERATION_STOPPED', 'TOOL_CALLS_PERFORMED',
 ];
 
@@ -70,6 +70,16 @@ test('Tauri snapshots preserve explicit roles, tool facts, and absolute floor in
   assert.equal(messages[4].toolCallId, 'call-b');
   assert.equal(messages[5].toolCallId, 'call-a');
   assert.equal(messages[6].role, 'assistant');
+  host.destroy();
+});
+
+test('Tauri message edit subscription uses the event constant available from its host', () => {
+  const { context, window, listeners } = tauriFixture(toolTranscript());
+  delete context.eventTypes.MESSAGE_UPDATED;
+  const host = createNativeHost(context, { window, document: null });
+  assert.equal(host.tavern_events.MESSAGE_UPDATED, 'message_edited');
+  host.eventOn(host.tavern_events.MESSAGE_UPDATED, () => {});
+  assert.equal(listeners.has('message_edited'), true);
   host.destroy();
 });
 
@@ -291,7 +301,7 @@ test('tool continuations reuse the same outline and bind it only to the final as
   lifecycle.destroy();
 });
 
-test('regenerate, swipe, and continue bind tool-assisted replies past the replaced floor', async () => {
+test('regenerate, swipe, and continue keep tool-assisted reply changes outside the current outline source', async () => {
   for (const type of ['regenerate', 'swipe', 'continue']) {
     let messages = planner.buildSnapshot(toolTranscript()).messages;
     let state = {};
@@ -325,7 +335,7 @@ test('regenerate, swipe, and continue bind tool-assisted replies past the replac
 
     messages = messages.filter(message => message.messageId !== 8);
     lifecycle.invalidate();
-    assert.equal(state.outlineHistory[0].status, 'invalid', `${type} should invalidate after a tool result is deleted`);
+    assert.equal(state.outlineHistory[0].status, 'used', `${type} should preserve the current outline when its generated tool reply changes`);
     lifecycle.destroy();
   }
 });
@@ -368,4 +378,15 @@ test('generation gate injects the same outline on recursive tool-generated reque
     { role: 'system', content: '<outline>本轮细纲</outline>' },
   ]);
   gate.destroy();
+});
+
+test('Tauri selected swipe supplies the current body when the cold history slot is empty', () => {
+  const { context, window } = tauriFixture([
+    { mes: '', is_user: false, is_system: false, swipe_id: 1, swipes: ['旧回复', '当前回复'] },
+  ]);
+  const host = createNativeHost(context, { window, document: null });
+  const current = host.getChatMessages('0-0')[0];
+  assert.equal(current.message, '当前回复');
+  assert.equal(planner.buildSnapshot([current]).messages[0].content, '当前回复');
+  host.destroy();
 });

@@ -79,13 +79,20 @@
         "CHAT_COMPLETION_PROMPT_READY",
         "MESSAGE_RECEIVED",
         "MESSAGE_SWIPED",
-        "MESSAGE_UPDATED",
         "MESSAGE_DELETED",
         "CHAT_CHANGED",
         "GENERATION_STARTED",
         "GENERATION_ENDED",
         "GENERATION_STOPPED"
       ]
+    },
+    {
+      "id": "message-edited-event",
+      "owner": "shared",
+      "symbol": "context.eventTypes.MESSAGE_EDITED | context.eventTypes.MESSAGE_UPDATED",
+      "required": true,
+      "fallback": null,
+      "anyOf": ["MESSAGE_EDITED", "MESSAGE_UPDATED"]
     }
   ]
 }

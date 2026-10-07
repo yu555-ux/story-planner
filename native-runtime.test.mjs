@@ -136,7 +136,7 @@ test('native runtime waits for initial planning, persists the outline, and injec
   assert.equal(apiCalls.length, 3);
   assert.match(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.lastError, /缺少.*<outline>/);
   assert.match(notices.at(-1), /缺少.*<outline>/);
-  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '<outline>下一轮细纲</outline>');
+  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '');
   const history = context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.outlineHistory;
   assert.deepEqual(history.map(record => record.usedMessageId), [2, 4]);
   context.chat.push({ mes: '玩家第三步', is_user: true, is_system: false });
@@ -151,6 +151,20 @@ test('native runtime waits for initial planning, persists the outline, and injec
   const failedPrompt = { chat: [], dryRun: false };
   context.eventSource.emit(events.CHAT_COMPLETION_PROMPT_READY, failedPrompt);
   assert.equal(failedPrompt.chat.length, 0, 'consumed previous outline must not be reinjected after rescue failure');
+  const preDeleteState = context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1;
+  const usedForFloorFour = preDeleteState.outlineHistory.find(record => record.usedMessageId === 4);
+  assert.ok(usedForFloorFour);
+  context.chat.splice(3); // The host truncates once from the selected floor to the end.
+  context.eventSource.emit(events.MESSAGE_DELETED); // SillyTavern emits one event for the whole batch.
+  const postDeleteState = context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1;
+  assert.equal(postDeleteState.outlineHistory.find(record => record.id === usedForFloorFour.id).status, 'ready');
+  assert.equal(postDeleteState.outlineHistory.some(record => ['invalid', 'superseded'].includes(record.status)), false);
+  assert.equal(postDeleteState.activeOutline, '');
+  const deletionLog = logs.find(([name, data]) => name === '[剧情规划器][生命周期对账]' && data?.operation === 'MESSAGE_DELETED');
+  assert.ok(deletionLog);
+  assert.equal(deletionLog[1].returnedToReadyCount, 1);
+  assert.equal(deletionLog[1].prunedCount, 0);
+  assert.doesNotMatch(JSON.stringify(deletionLog), /<outline>|酒馆 AI|玩家第三步|secret/);
   rescueGate.destroy();
   const connectionResult = await runtime.testConnection({ apiurl: 'https://api.example/v1', model: 'planner-model', key: '' });
   assert.match(connectionResult, /连接测试成功/);

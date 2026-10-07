@@ -48,7 +48,7 @@ test('running progress stays on the coalesced path while the successful outline 
   f.life.destroy();
 });
 
-test('manual replan preserves old result, supersedes only ready revision, and deduplicates active requests', async () => {
+test('manual replan removes the prior ready revision and deduplicates active requests', async () => {
   let calls = 0;
   const f = fixture(async () => result(`版本${++calls}`), { retryCount: 0 });
   const first = await f.life.ensureCurrent();
@@ -56,9 +56,10 @@ test('manual replan preserves old result, supersedes only ready revision, and de
   f.life.manual();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls, 2);
-  assert.equal(f.state().outlineHistory.length, 2);
-  assert.equal(f.state().outlineHistory[0].status, 'superseded');
-  assert.equal(f.state().outlineHistory[0].body, first.body);
+  assert.equal(f.state().outlineHistory.length, 1);
+  assert.equal(f.state().outlineHistory.some(item => item.id === first.id), false);
+  assert.equal(f.state().outlineHistory[0].status, 'ready');
+  assert.equal(f.state().outlineHistory[0].body, '版本2');
   assert.equal((await f.life.ensureCurrent()).body, '版本2');
   f.life.destroy();
 });
@@ -76,7 +77,7 @@ test('swipe generation uses the preceding source rather than the next-round read
   f.life.destroy();
 });
 
-test('history can be reopened with stable chat identity; stale legacy outline is never injected', async () => {
+test('history reopens with stable chat identity and drops an unverifiable legacy outline', async () => {
   let state = { activeOutline: '<outline>旧细纲</outline>' };
   let calls = 0;
   const options = {
@@ -90,8 +91,8 @@ test('history can be reopened with stable chat identity; stale legacy outline is
   const record = await life.ensureCurrent();
   const identity = life.identity();
   assert.equal(calls, 1);
-  assert.equal(state.outlineHistory[0].status, 'invalid');
-  assert.equal(state.outlineHistory[0].body, '旧细纲');
+  assert.equal(state.outlineHistory.some(item => item.body === '旧细纲'), false);
+  assert.equal(state.activeOutline, '<outline>新细纲</outline>');
   life.destroy();
   life = engine.createPlanningLifecycle(options);
   assert.equal(life.identity(), identity);
@@ -314,6 +315,304 @@ test('exported or copied chat state reuses only a source-verified outline', asyn
   messages[0].content = '复制后改动的开场';
   const replanned = await life.ensureCurrent();
   assert.equal(replanned.body, '细纲2');
-  assert.equal(state.outlineHistory.find(item => item.id === first.id).status, 'invalid');
+  assert.equal(state.outlineHistory.some(item => item.id === first.id), false);
   life.destroy();
+});
+
+test('repeated regenerate requests reuse the same current outline after temporary assistant deletion', async () => {
+  let calls = 0;
+  const f = fixture(async () => result(`细纲${++calls}`), { retryCount: 0 });
+  const waitForCalls = async expected => {
+    for (let attempt = 0; attempt < 30 && calls < expected; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, expected);
+  };
+
+  const initial = await f.life.ensureCurrent();
+  assert.equal(f.life.markUsing(initial.id), true);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
+  f.life.onMessage();
+  await waitForCalls(2);
+  f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
+  const current = await f.life.ensureCurrent();
+  const currentId = current.id;
+  assert.equal(f.life.markUsing(currentId), true);
+  f.messages.push({ messageId: 4, role: 'assistant', content: '4楼回复0' });
+  f.life.onMessage();
+  await waitForCalls(3);
+
+  for (let roll = 1; roll <= 3; roll += 1) {
+    f.messages.pop();
+    f.life.invalidate(); // SillyTavern may emit MESSAGE_DELETED before the regenerate interceptor.
+    const reused = await f.life.ensureCurrent('regenerate');
+    assert.equal(reused.id, currentId);
+    assert.equal(f.life.markUsing(reused.id, 'regenerate'), true);
+    f.messages.push({ messageId: 4, role: 'assistant', content: `4楼重roll${roll}` });
+    f.life.onMessage();
+    await waitForCalls(3 + roll);
+  }
+  assert.equal(f.state().outlineHistory.find(item => item.id === currentId).status, 'used');
+  f.life.destroy();
+});
+
+test('swiping the current assistant preserves the current outline while replacing only its next outline', async () => {
+  let calls = 0;
+  const f = fixture(async () => result(`细纲${++calls}`), { retryCount: 0 });
+  const initial = await f.life.ensureCurrent();
+  f.life.markUsing(initial.id);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
+  f.life.onMessage();
+  await new Promise(resolve => setImmediate(resolve));
+  f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
+  const current = await f.life.ensureCurrent();
+  f.life.markUsing(current.id);
+  f.messages.push({ messageId: 4, role: 'assistant', content: '4楼回复A' });
+  f.life.onMessage();
+  await new Promise(resolve => setImmediate(resolve));
+  const callsBeforeSwipe = calls;
+
+  f.messages[4].content = '4楼回复B';
+  f.life.onMessage(); // MESSAGE_SWIPED for the existing assistant floor.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, callsBeforeSwipe + 1);
+  assert.equal((await f.life.ensureCurrent('swipe')).id, current.id);
+  f.life.destroy();
+});
+
+test('first use locks a pre-generated outline to the player input fingerprint', async () => {
+  let calls = 0;
+  const f = fixture(async () => result(`细纲${++calls}`), { retryCount: 0 });
+  const initial = await f.life.ensureCurrent();
+  f.life.markUsing(initial.id);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
+  f.life.onMessage();
+  await new Promise(resolve => setImmediate(resolve));
+  f.messages.push({ messageId: 3, role: 'user', content: '原输入' });
+  const firstUse = await f.life.ensureCurrent();
+  assert.equal(f.life.markUsing(firstUse.id), true);
+  f.messages[3].content = '不同输入';
+
+  const replanned = await f.life.ensureCurrent();
+  assert.notEqual(replanned.id, firstUse.id);
+  assert.equal(replanned.body, '细纲3');
+  f.life.destroy();
+});
+
+async function preparedUsedRound() {
+  let calls = 0;
+  const f = fixture(async () => result(`细纲${++calls}`), { retryCount: 0 });
+  const initial = await f.life.ensureCurrent();
+  assert.equal(f.life.markUsing(initial.id), true);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
+  f.life.onMessage();
+  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
+  const current = await f.life.ensureCurrent();
+  assert.equal(f.life.markUsing(current.id), true);
+  f.messages.push({ messageId: 4, role: 'assistant', content: '4楼回复' });
+  f.life.onMessage();
+  for (let attempt = 0; attempt < 30 && calls < 3; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 3);
+  const next = f.state().outlineHistory.findLast(item => item.status === 'ready');
+  return { f, current, next, calls: () => calls };
+}
+
+test('deleting only the used assistant floor returns its outline to ready and removes its derived next outline', async () => {
+  const { f, current, next } = await preparedUsedRound();
+  f.messages.pop();
+  const changes = f.life.invalidate('MESSAGE_DELETED');
+  assert.equal(f.state().outlineHistory.find(item => item.id === current.id).status, 'ready');
+  assert.equal(f.state().outlineHistory.some(item => item.id === next.id), false);
+  assert.deepEqual(changes.returnedToReadyIds, [current.id]);
+  assert.deepEqual(changes.prunedIds, [next.id]);
+  f.life.destroy();
+});
+
+test('deleting from the player floor through the end preserves a same-input candidate and replans different input', async () => {
+  for (const input of ['3楼输入', '不同输入']) {
+    const { f, current, next, calls } = await preparedUsedRound();
+    f.messages.splice(3);
+    const changes = f.life.invalidate('MESSAGE_DELETED');
+    assert.equal(changes.returnedToReadyIds.includes(current.id), true);
+    assert.equal(f.state().outlineHistory.some(item => item.id === next.id), false);
+    f.messages.push({ messageId: 3, role: 'user', content: input });
+    const selected = await f.life.ensureCurrent();
+    if (input === '3楼输入') assert.equal(selected.id, current.id);
+    else {
+      assert.notEqual(selected.id, current.id);
+      assert.equal(calls(), 4);
+    }
+    f.life.destroy();
+  }
+});
+
+test('deleting a generation source floor prunes every outline derived from it', async () => {
+  const { f, current } = await preparedUsedRound();
+  f.messages.splice(2);
+  const changes = f.life.invalidate('MESSAGE_DELETED');
+  assert.equal(f.state().outlineHistory.some(item => item.id === current.id), false);
+  assert.ok(changes.prunedIds.includes(current.id));
+  f.life.destroy();
+});
+
+test('schema migration removes invalid and superseded records and clears stale active outline text', () => {
+  let state = {
+    schemaVersion: 3,
+    chatId: 'persisted-chat',
+    activeOutline: '<outline>不再可用的细纲</outline>',
+    outlineHistory: [
+      { id: 'invalid-old', sequence: 1, status: 'invalid', fullTag: '<outline>失效</outline>', body: '失效' },
+      { id: 'superseded-old', sequence: 2, status: 'superseded', fullTag: '<outline>替代</outline>', body: '替代' },
+    ],
+  };
+  const messages = [{ messageId: 0, role: 'assistant', content: '开场' }, { messageId: 1, role: 'user', content: '输入' }];
+  const life = engine.createPlanningLifecycle({
+    readMessages: () => structuredClone(messages), readState: () => state, writeState: value => { state = value; },
+    getConfig: () => ({ enabled: true, retryCount: 0, timeoutSeconds: 1 }), getSignature: () => 'preset',
+    run: async () => result('新细纲'), classifyFailure: engine.classifyPlannerFailure,
+    extractOutline: engine.extractOutline, hash: engine.fnv1a, stop() {}, notify() {}, log: {},
+  });
+  const migrated = life.getState();
+  assert.equal(migrated.schemaVersion, 4);
+  assert.deepEqual(migrated.outlineHistory, []);
+  assert.equal(migrated.activeOutline, '');
+  assert.doesNotMatch(JSON.stringify(migrated), /失效|替代|不再可用/);
+  life.destroy();
+});
+
+test('schema migration retains a ready record whose older source hash still verifies', async () => {
+  const messages = engine.buildSnapshot([
+    { message_id: 0, role: 'assistant', message: '开场', message_fingerprint: 'old-opening-fingerprint', input_fingerprint: 'opening-input' },
+    { message_id: 1, role: 'user', message: '输入', message_fingerprint: 'old-user-fingerprint', input_fingerprint: 'same-user-input' },
+  ]).messages;
+  const oldSourceHash = engine.fnv1a(JSON.stringify(messages.map(({ messageId, role, content }) => ({ messageId, role, content }))));
+  let state = {
+    schemaVersion: 3, chatId: 'persisted-chat', activeOutline: '<outline>旧格式仍可验证</outline>',
+    outlineHistory: [{ id: 'old-ready', sequence: 7, key: `persisted-chat:1:${oldSourceHash}:preset`,
+      chatId: 'persisted-chat', signature: 'preset', sourceHash: oldSourceHash, sourceMessageId: 1,
+      purpose: 'initial', status: 'ready', fullTag: '<outline>旧格式仍可验证</outline>', body: '旧格式仍可验证',
+      usedMessageId: null, createdAt: '2026-01-01T00:00:00.000Z' }],
+  };
+  let calls = 0;
+  const life = engine.createPlanningLifecycle({
+    readMessages: () => structuredClone(messages), readState: () => state, writeState: value => { state = value; },
+    getConfig: () => ({ enabled: true, retryCount: 0, timeoutSeconds: 1 }), getSignature: () => 'preset',
+    run: async () => { calls += 1; return result('新细纲'); }, classifyFailure: engine.classifyPlannerFailure,
+    extractOutline: engine.extractOutline, hash: engine.fnv1a, stop() {}, notify() {}, log: {},
+  });
+  assert.equal((await life.ensureCurrent()).id, 'old-ready');
+  assert.equal(calls, 0);
+  assert.equal(state.outlineHistory[0].sourceHash === oldSourceHash, false);
+  life.destroy();
+});
+
+test('middle deletion with duplicate message fingerprints is treated as ambiguous and pruned', async () => {
+  let state = {};
+  let calls = 0;
+  const messages = [
+    { messageId: 0, role: 'assistant', content: '开场' },
+    { messageId: 1, role: 'assistant', content: '重复回复' },
+    { messageId: 2, role: 'assistant', content: '重复回复' },
+    { messageId: 3, role: 'user', content: '继续' },
+  ];
+  const life = engine.createPlanningLifecycle({
+    readMessages: () => structuredClone(messages), readState: () => state, writeState: value => { state = value; },
+    getConfig: () => ({ enabled: true, retryCount: 0, timeoutSeconds: 1 }), getSignature: () => 'preset',
+    run: async () => { calls += 1; return result(`细纲${calls}`); }, classifyFailure: engine.classifyPlannerFailure,
+    extractOutline: engine.extractOutline, hash: engine.fnv1a, stop() {}, notify() {}, log: {},
+  });
+  const outline = await life.ensureCurrent();
+  messages.splice(1, 1);
+  messages.forEach((message, messageId) => { message.messageId = messageId; });
+  const changes = life.invalidate('MESSAGE_DELETED');
+  assert.equal(state.outlineHistory.some(record => record.id === outline.id), false);
+  assert.deepEqual(changes.ambiguousIds, [outline.id]);
+  assert.equal(calls, 1);
+  life.destroy();
+});
+
+test('deleting one of two identical player inputs does not preserve an ambiguous candidate', async () => {
+  let state = {};
+  const messages = [
+    { messageId: 0, role: 'assistant', content: '开场' },
+    { messageId: 1, role: 'assistant', content: '共同来源' },
+    { messageId: 2, role: 'user', content: '重复输入' },
+    { messageId: 3, role: 'user', content: '重复输入' },
+  ];
+  const life = engine.createPlanningLifecycle({
+    readMessages: () => structuredClone(messages), readState: () => state, writeState: value => { state = value; },
+    getConfig: () => ({ enabled: true, retryCount: 0, timeoutSeconds: 1 }), getSignature: () => 'preset',
+    run: async () => result('输入细纲'), classifyFailure: engine.classifyPlannerFailure,
+    extractOutline: engine.extractOutline, hash: engine.fnv1a, stop() {}, notify() {}, log: {},
+  });
+  const outline = await life.ensureCurrent();
+  messages.splice(2, 1);
+  messages.forEach((message, messageId) => { message.messageId = messageId; });
+  const changes = life.invalidate('MESSAGE_DELETED');
+  assert.equal(state.outlineHistory.some(record => record.id === outline.id), false);
+  assert.deepEqual(changes.ambiguousIds, [outline.id]);
+  life.destroy();
+});
+
+test('deleting the source while a plan request is in flight cancels its late result', async () => {
+  let release;
+  const f = fixture(() => new Promise(resolve => { release = resolve; }), { retryCount: 0 });
+  const pending = f.life.ensureCurrent();
+  await Promise.resolve();
+  f.messages.splice(1);
+  const changes = f.life.invalidate('MESSAGE_DELETED');
+  release(result('迟到细纲'));
+  await assert.rejects(pending);
+  assert.equal(f.state().outlineHistory.length, 0);
+  assert.deepEqual(changes.cancelledTaskIds.length, 1);
+  assert.doesNotMatch(JSON.stringify(f.state()), /迟到细纲/);
+  f.life.destroy();
+});
+
+test('stopping current foreground planning cancels it without stopping background next planning', async () => {
+  let releaseCurrent;
+  const foreground = fixture(() => new Promise(resolve => { releaseCurrent = resolve; }), { retryCount: 0 });
+  const pendingCurrent = foreground.life.ensureCurrent();
+  await Promise.resolve();
+  foreground.life.stopCurrent();
+  releaseCurrent(result('停止后迟到的细纲'));
+  await assert.rejects(pendingCurrent);
+  assert.equal(foreground.state().outlineHistory.length, 0);
+  foreground.life.destroy();
+
+  let calls = 0;
+  let releaseNext;
+  const background = fixture(() => {
+    calls += 1;
+    return calls === 1 ? Promise.resolve(result('本轮')) : new Promise(resolve => { releaseNext = resolve; });
+  }, { retryCount: 0 });
+  const initial = await background.life.ensureCurrent();
+  assert.equal(background.life.markUsing(initial.id), true);
+  background.messages.push({ messageId: 2, role: 'assistant', content: '本轮回复' });
+  background.life.onMessage();
+  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(background.life.getStatus().phase, 'next');
+  background.life.stopCurrent();
+  assert.equal(background.life.getStatus().running, true);
+  releaseNext(result('后台下一轮'));
+  for (let attempt = 0; attempt < 30 && background.state().outlineHistory.length < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(background.state().outlineHistory.some(record => record.body === '后台下一轮'), true);
+  background.life.destroy();
+});
+
+test('stopping after outline injection restores ready or last-used state', async () => {
+  const fresh = fixture(async () => result('待用细纲'), { retryCount: 0 });
+  const ready = await fresh.life.ensureCurrent();
+  assert.equal(fresh.life.markUsing(ready.id), true);
+  fresh.life.stopCurrent();
+  assert.equal(fresh.state().outlineHistory.find(record => record.id === ready.id).status, 'ready');
+  fresh.life.destroy();
+
+  const { f, current } = await preparedUsedRound();
+  const previousUsedMessageId = f.state().outlineHistory.find(record => record.id === current.id).usedMessageId;
+  assert.equal(f.life.markUsing(current.id, 'regenerate'), true);
+  f.life.stopCurrent();
+  const restored = f.state().outlineHistory.find(record => record.id === current.id);
+  assert.equal(restored.status, 'used');
+  assert.equal(restored.usedMessageId, previousUsedMessageId);
+  f.life.destroy();
 });

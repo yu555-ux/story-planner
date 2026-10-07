@@ -863,6 +863,8 @@
           messageId: message.message_id,
           role,
           content: String(message.message ?? message.content ?? message.mes ?? ''),
+          ...(typeof message.message_fingerprint === 'string' ? { messageFingerprint: message.message_fingerprint } : {}),
+          ...(typeof message.input_fingerprint === 'string' ? { inputFingerprint: message.input_fingerprint } : {}),
           ...(getToolCalls(message).length ? { toolCalls: structuredClone(getToolCalls(message)) } : {}),
           ...(typeof (message.tool_call_id ?? message.toolCallId) === 'string'
             ? { toolCallId: message.tool_call_id ?? message.toolCallId } : {}),
@@ -1110,6 +1112,10 @@
   function buildPanelViewModel(requestedConfig, planningState, runtimeStatus = {}, presetReady = true) {
     const config = normalizeConfig({ ...DEFAULT_CONFIG, ...(isRecord(requestedConfig) ? requestedConfig : {}) });
     const state = isRecord(planningState) ? planningState : {};
+    const outlineHistory = (Array.isArray(state.outlineHistory) ? state.outlineHistory : [])
+      .filter(record => ['ready', 'using', 'used'].includes(record?.status) && record.inputPending !== true
+        && typeof record.body === 'string' && record.body.trim());
+    const activeRecord = outlineHistory.findLast(record => record.fullTag === state.activeOutline) ?? null;
     const status = !config.enabled ? 'disabled'
       : runtimeStatus.running ? state.status === 'retrying' ? 'retrying' : 'running'
         : runtimeStatus.pending ? 'pending'
@@ -1117,7 +1123,7 @@
     const statusLabels = {
       disabled: '自动规划已关闭', idle: '等待规划', pending: '等待中', running: '规划中', retrying: '重试中', ready: '已完成', failed: '失败', interrupted: '上次任务中断',
     };
-    const outline = typeof state.activeOutline === 'string' ? extractOutline(state.activeOutline) : null;
+    const outline = activeRecord && typeof state.activeOutline === 'string' ? extractOutline(state.activeOutline) : null;
     const activationHint = !config.enabled ? '规划器已关闭，不会调用规划 API。'
       : Object.keys(validateConfig(config)).length ? '规划器已开启，请在设置中填写 API 地址和模型。'
         : !presetReady ? '规划器已开启，请先导入或填写可用预设。'
@@ -1129,7 +1135,7 @@
       activationHint,
       updatedAt: text(state.updatedAt, 80),
       outlineBody: outline?.ok ? outline.body : '',
-      outlineHistory: Array.isArray(state.outlineHistory) ? structuredClone(state.outlineHistory) : [],
+      outlineHistory: structuredClone(outlineHistory),
       lastTask: state.lastTask ?? null,
       lastError: text(state.lastError, DEFAULT_LIMITS.maxTextLength),
       persistenceError: text(state.persistenceError ?? runtimeStatus.persistenceError, DEFAULT_LIMITS.maxTextLength),
@@ -2044,11 +2050,12 @@
       statusBadge.dataset.status = view.status;
       activationHint.textContent = view.activationHint ?? '';
       updatedAt.textContent = view.updatedAt ? `更新：${view.updatedAt}` : '尚无规划记录';
-      const history = view.outlineHistory ?? [];
-      const available = history.filter(record => record.body);
-      const currentRecord = available.findLast(record => ['ready', 'using'].includes(record.status)) ?? available.at(-1) ?? null;
-      const shownBody = currentRecord?.body ?? view.outlineBody;
-      const labels = { ready: '待使用', using: '本轮使用中', used: '已使用', invalid: '已失效', superseded: '已替换' };
+      const history = (view.outlineHistory ?? []).filter(record => ['ready', 'using', 'used'].includes(record.status)
+        && record.inputPending !== true && typeof record.body === 'string' && record.body.trim());
+      const currentRecord = history.findLast(record => ['ready', 'using'].includes(record.status))
+        ?? history.findLast(record => record.body === view.outlineBody) ?? null;
+      const shownBody = currentRecord?.body ?? '';
+      const labels = { ready: '待使用', using: '本轮使用中', used: '已使用' };
       outlineBody.hidden = !shownBody;
       statusLine.hidden = Boolean(shownBody);
       const nextFeatureStamp = shownBody ? JSON.stringify([currentRecord?.id, currentRecord?.status, currentRecord?.sourceMessageId, currentRecord?.createdAt, view.statusLabel, view.updatedAt, shownBody]) : null;
@@ -2077,9 +2084,9 @@
           main.append(element('strong', '', parts ? [parts.place, parts.time].filter(Boolean).join(' · ') || `细纲 ${record.sequence}` : `细纲 ${record.sequence}`),
             element('small', '', `${parts ? `事件内容：${parts.event.slice(0, 45)}${parts.event.length > 45 ? '…' : ''} · ` : ''}${source} → ${used}`));
           summary.append(element('span', 'twsp-history-number', String(record.sequence ?? '').padStart(2, '0')), main,
-            element('span', 'twsp-history-state', labels[record.status] ?? record.status), inlineIcon('chevron', 'twsp-history-chevron'));
+            element('span', 'twsp-history-state', labels[record.status] ?? ''), inlineIcon('chevron', 'twsp-history-chevron'));
           item.append(summary,
-            element('p', 'twsp-hint', `${record.purpose === 'initial' ? '初始规划' : record.purpose === 'legacy' ? '旧版本记录' : '下一轮规划'} · ${record.createdAt ?? ''}${record.invalidReason ? ` · ${record.invalidReason}` : ''}`),
+            element('p', 'twsp-hint', `${record.purpose === 'initial' ? '初始规划' : '下一轮规划'} · ${record.createdAt ?? ''}`),
             outlineCard(record.body));
           return item;
         });
@@ -2494,20 +2501,75 @@
     let claim = null;
     let recoveryChecked = false;
     let persistenceQueue = Promise.resolve();
+    let observedMessages = structuredClone(readMessages() ?? []);
     const uid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
     const stamp = () => new Date().toISOString();
     const prefixHash = messages => hash(JSON.stringify(messages));
+    const inputFingerprint = message => typeof message?.inputFingerprint === 'string' && message.inputFingerprint
+      ? message.inputFingerprint : hash(JSON.stringify({ role: message?.role ?? null, content: message?.content ?? '' }));
+    const messageFingerprint = message => typeof message?.messageFingerprint === 'string' && message.messageFingerprint
+      ? message.messageFingerprint : hash(JSON.stringify({ role: message?.role ?? null, content: message?.content ?? '',
+        inputFingerprint: inputFingerprint(message), toolCalls: message?.toolCalls ?? null, toolCallId: message?.toolCallId ?? null }));
 
     function state() {
       const old = readState() ?? {};
       let value = old;
-      if (old.schemaVersion !== 3 || !Array.isArray(old.outlineHistory) || !old.chatId) {
-        const legacy = extractOutline(old.activeOutline ?? '');
-        value = { ...old, schemaVersion: 3, chatId: old.chatId || uid(), outlineHistory: legacy.ok ? [{
-          id: uid(), sequence: 1, purpose: 'legacy', status: 'invalid', body: legacy.body,
-          fullTag: legacy.fullTag, sourceMessageId: old.outlineSourceMessageId ?? null,
-          usedMessageId: null, createdAt: old.updatedAt ?? stamp(), invalidReason: '旧版本记录无法验证聊天进度',
-        }] : [] };
+      if (old.schemaVersion !== 4 || !Array.isArray(old.outlineHistory) || !old.chatId) {
+        const chatId = old.chatId || uid();
+        const messages = structuredClone(readMessages() ?? []);
+        const history = (Array.isArray(old.outlineHistory) ? old.outlineHistory : []).flatMap(record => {
+          if (!record || !['ready', 'using', 'used'].includes(record.status)
+            || !Number.isInteger(record.sourceMessageId) || typeof record.sourceHash !== 'string'
+            || typeof record.signature !== 'string' || !extractOutline(record.fullTag).ok) return [];
+          const sourcePrefix = messages.filter(item => item.messageId <= record.sourceMessageId);
+          const legacyPrefix = sourcePrefix.map(message => ({
+            messageId: message.messageId, role: message.role, content: message.content,
+            ...(Array.isArray(message.toolCalls) && message.toolCalls.length ? { toolCalls: message.toolCalls } : {}),
+            ...(typeof message.toolCallId === 'string' ? { toolCallId: message.toolCallId } : {}),
+            ...(typeof message.name === 'string' ? { name: message.name } : {}),
+          }));
+          const migratedSourceHash = prefixHash(sourcePrefix);
+          if (migratedSourceHash !== record.sourceHash && prefixHash(legacyPrefix) !== record.sourceHash) return [];
+          const normalized = { ...record, chatId: record.chatId || chatId,
+            sourceHash: migratedSourceHash,
+            key: `${record.chatId || chatId}:${record.sourceMessageId}:${migratedSourceHash}:${record.signature}`,
+            status: record.status === 'using' ? 'ready' : record.status };
+          let inputMessage = Number.isInteger(normalized.inputMessageId)
+            ? messages.find(item => item.messageId === normalized.inputMessageId && item.role === 'user') : null;
+          if (!normalized.inputFingerprint && normalized.status === 'used') {
+            inputMessage = messages.findLast(item => item.role === 'user' && item.messageId <= normalized.usedMessageId
+              && (normalized.purpose === 'initial' || item.messageId > normalized.sourceMessageId)) ?? inputMessage;
+            if (inputMessage) normalized.inputFingerprint = inputFingerprint(inputMessage);
+          }
+          if (normalized.inputFingerprint && normalized.inputMessageId != null) {
+            if (!inputMessage) normalized.inputMessageId = null;
+            else if (inputFingerprint(inputMessage) !== normalized.inputFingerprint) return [];
+          }
+          if (normalized.status === 'used') {
+            const usedMessage = messages.find(item => item.messageId === normalized.usedMessageId);
+            if (!usedMessage || usedMessage.role !== 'assistant') {
+              normalized.status = 'ready';
+              delete normalized.usedMessageId;
+              delete normalized.usedHash;
+              delete normalized.usedHashThroughMessageId;
+              delete normalized.usedAt;
+            } else if (!normalized.usedHash && Number.isInteger(normalized.inputMessageId)) {
+              normalized.usedHashThroughMessageId = normalized.inputMessageId;
+              normalized.usedHash = prefixHash(messages.filter(item => item.messageId <= normalized.inputMessageId));
+            }
+          }
+          return [normalized];
+        });
+        const migrationPruned = (Array.isArray(old.outlineHistory) ? old.outlineHistory : [])
+          .filter(record => !history.some(item => item.id === record?.id));
+        if (migrationPruned.length) log.info?.('[剧情规划器][生命周期清理]', { operation: 'schema_migration',
+          prunedCount: migrationPruned.length, records: migrationPruned.map(record => ({ id: record?.id ?? null,
+            sourceMessageId: record?.sourceMessageId ?? null, usedMessageId: record?.usedMessageId ?? null,
+            reason: ['invalid', 'superseded'].includes(record?.status) ? 'legacy_status' : 'unverified_legacy_record' })) });
+        const active = history.at(-1) ?? null;
+        value = { ...old, schemaVersion: 4, chatId, outlineHistory: history,
+          activeOutline: active?.fullTag ?? '', outlineSourceMessageId: active?.sourceMessageId ?? null,
+          outlineRevision: active?.sequence ?? null, rawText: active?.fullTag ?? '' };
         writeState(value);
       }
       if (!recoveryChecked) {
@@ -2524,7 +2586,7 @@
     }
     function update(patch) {
       const old = state();
-      writeState({ ...old, ...patch, schemaVersion: 3, stateVersion: (old.stateVersion ?? 0) + 1, updatedAt: stamp() });
+      writeState({ ...old, ...patch, schemaVersion: 4, stateVersion: (old.stateVersion ?? 0) + 1, updatedAt: stamp() });
     }
     function persistCritical(expectedEpoch = epoch, expectedChatId = state().chatId) {
       if (typeof persistState !== 'function') return Promise.resolve(true);
@@ -2574,6 +2636,8 @@
       const previousAssistant = storyMessages.findLast(item => item.role === 'assistant' && item.messageId > 0);
       const latestUser = storyMessages.findLast(item => item.role === 'user');
       const sourceMessageId = previousAssistant?.messageId ?? latestUser?.messageId ?? storyMessages.at(-1)?.messageId ?? -1;
+      const currentUser = latestUser && latestUser.messageId > (previousAssistant?.messageId ?? -1) ? latestUser : null;
+      const currentInputFingerprint = currentUser ? inputFingerprint(currentUser) : null;
       const sourceMessages = messages.filter(item => item.messageId <= sourceMessageId);
       const anchor = storyMessages.filter(item => item.messageId <= sourceMessageId);
       const signature = getSignature();
@@ -2582,34 +2646,182 @@
       return { chatId, sourceMessageId, sourceHash, signature,
         key: `${chatId}:${sourceMessageId}:${sourceHash}:${signature}`,
         purpose: previousAssistant ? 'next' : 'initial', messages: anchor,
-        invocationMessages: messages, replacementFloor };
+        invocationMessages: messages, replacementFloor, inputMessageId: currentUser?.messageId ?? null,
+        inputFingerprint: currentInputFingerprint };
     }
     function matches(anchor, checkSignature = true) {
       if (destroyed || anchor.chatId !== state().chatId || (checkSignature && anchor.signature !== getSignature())) return false;
       return prefixHash(readMessages().filter(item => item.messageId <= anchor.sourceMessageId)) === anchor.sourceHash;
     }
     function valid(record, expected) {
-      return record && expected && record.key === expected.key && matches(record)
+      const inputMatches = !record?.inputFingerprint || Boolean(expected?.inputFingerprint
+        && record.inputFingerprint === expected.inputFingerprint
+        && (record.inputMessageId == null || record.inputMessageId === expected.inputMessageId));
+      return record && expected && record.key === expected.key && inputMatches && matches(record)
         && ['ready', 'used', 'using'].includes(record.status) && extractOutline(record.fullTag).ok;
     }
     function select(expected) {
       return state().outlineHistory.findLast(record => valid(record, expected)) ?? null;
     }
-    function revalidate() {
-      const old = state();
-      let changed = false;
-      const messages = readMessages();
-      const history = old.outlineHistory.map(record => {
-        if (['invalid', 'superseded'].includes(record.status)) return record;
-        const usedChanged = record.usedMessageId != null
-          && prefixHash(messages.filter(item => item.messageId <= record.usedMessageId)) !== record.usedHash;
-        if (!matches(record, record.status !== 'used') || usedChanged) {
-          changed = true;
-          return { ...record, status: 'invalid', invalidReason: '聊天记录或规划配置已变化' };
+    function reconcileMessages(previous, current, operation = 'MESSAGE_UPDATED') {
+      const before = Array.isArray(previous) ? previous : [];
+      const after = Array.isArray(current) ? current : [];
+      const beforeCounts = new Map();
+      const afterCounts = new Map();
+      for (const message of before) beforeCounts.set(messageFingerprint(message), (beforeCounts.get(messageFingerprint(message)) ?? 0) + 1);
+      for (const message of after) afterCounts.set(messageFingerprint(message), (afterCounts.get(messageFingerprint(message)) ?? 0) + 1);
+      const ambiguousFingerprints = new Set([...beforeCounts.keys()].filter(fingerprint =>
+        beforeCounts.get(fingerprint) !== (afterCounts.get(fingerprint) ?? 0)
+        && ((beforeCounts.get(fingerprint) ?? 0) > 1 || (afterCounts.get(fingerprint) ?? 0) > 0)));
+      const mapping = new Map();
+      const ambiguousMessageIds = new Set();
+      const beforeIds = before.map(message => message.messageId);
+      const afterIds = after.map(message => message.messageId);
+      const sameFingerprint = (left, right) => messageFingerprint(left) === messageFingerprint(right);
+      let prefix = 0;
+      while (prefix < before.length && prefix < after.length && sameFingerprint(before[prefix], after[prefix])) {
+        mapping.set(beforeIds[prefix], afterIds[prefix]);
+        prefix += 1;
+      }
+      let suffix = 0;
+      while (suffix < before.length - prefix && suffix < after.length - prefix
+        && sameFingerprint(before[before.length - suffix - 1], after[after.length - suffix - 1])) {
+        mapping.set(beforeIds[before.length - suffix - 1], afterIds[after.length - suffix - 1]);
+        suffix += 1;
+      }
+      const beforeMiddle = before.slice(prefix, before.length - suffix);
+      const afterMiddle = after.slice(prefix, after.length - suffix);
+      const isDelete = operation === 'MESSAGE_DELETED' || operation === 'delete';
+      if (!isDelete && beforeMiddle.length === afterMiddle.length) {
+        for (let index = 0; index < beforeMiddle.length; index += 1) {
+          if (beforeMiddle[index].role === afterMiddle[index].role) {
+            mapping.set(beforeMiddle[index].messageId, afterMiddle[index].messageId);
+          }
         }
-        return record;
-      });
-      if (changed) update({ outlineHistory: history });
+      }
+      for (const message of before) {
+        if (ambiguousFingerprints.has(messageFingerprint(message))) {
+          ambiguousMessageIds.add(message.messageId);
+          mapping.delete(message.messageId);
+        }
+      }
+
+      const old = state();
+      const pruned = [];
+      const returnedToReady = [];
+      const returnedEntries = [];
+      const cancelledTasks = [];
+      const retained = [];
+      const currentById = new Map(after.map(message => [message.messageId, message]));
+      for (const record of old.outlineHistory) {
+        const prune = reason => {
+          pruned.push({ id: record.id, sourceMessageId: record.sourceMessageId ?? null,
+            usedMessageId: record.usedMessageId ?? null, reason });
+        };
+        if (!['ready', 'using', 'used'].includes(record.status)) { prune('legacy_status'); continue; }
+        const sourceMessageId = mapping.get(record.sourceMessageId);
+        if (!Number.isInteger(sourceMessageId)) {
+          prune(ambiguousMessageIds.has(record.sourceMessageId) ? 'ambiguous_source' : 'source_removed');
+          continue;
+        }
+        const sourcePrefix = after.filter(message => message.messageId <= sourceMessageId);
+        if (prefixHash(sourcePrefix) !== record.sourceHash) { prune('source_changed'); continue; }
+        if (record.signature !== getSignature()) { prune('configuration_changed'); continue; }
+        const nextRecord = { ...record, sourceMessageId };
+        if (nextRecord.inputFingerprint && Number.isInteger(nextRecord.inputMessageId)) {
+          const nextInputId = mapping.get(nextRecord.inputMessageId);
+          if (Number.isInteger(nextInputId)) {
+            const input = currentById.get(nextInputId);
+            if (!input || input.role !== 'user' || inputFingerprint(input) !== nextRecord.inputFingerprint) {
+              prune('input_changed'); continue;
+            }
+            nextRecord.inputMessageId = nextInputId;
+          } else if (record.inputMessageId <= record.sourceMessageId) {
+            prune('source_input_removed'); continue;
+          } else if (ambiguousMessageIds.has(record.inputMessageId)) {
+            prune('ambiguous_input'); continue;
+          } else {
+            nextRecord.inputMessageId = null;
+            nextRecord.inputPending = true;
+            if (nextRecord.status === 'using') nextRecord.status = 'ready';
+          }
+        } else if (nextRecord.inputFingerprint) {
+          const nextUser = after.findLast(message => message.role === 'user' && message.messageId > sourceMessageId);
+          if (nextUser) {
+            if (inputFingerprint(nextUser) !== nextRecord.inputFingerprint) { prune('input_changed'); continue; }
+            nextRecord.inputMessageId = nextUser.messageId;
+            delete nextRecord.inputPending;
+          }
+        }
+        if (Number.isInteger(nextRecord.usedMessageId)) {
+          const nextUsedId = mapping.get(nextRecord.usedMessageId);
+          const usedMessage = Number.isInteger(nextUsedId) ? currentById.get(nextUsedId) : null;
+          if (usedMessage?.role === 'assistant') {
+            nextRecord.usedMessageId = nextUsedId;
+          } else if (record.status === 'used' || record.status === 'using') {
+            nextRecord.status = 'ready';
+            delete nextRecord.usedMessageId;
+            delete nextRecord.usedHash;
+            delete nextRecord.usedHashThroughMessageId;
+            delete nextRecord.usedAt;
+            returnedToReady.push(record.id);
+            returnedEntries.push({ id: record.id, sourceMessageId: record.sourceMessageId ?? null,
+              usedMessageId: record.usedMessageId ?? null, reason: 'used_reply_removed' });
+          } else {
+            prune('used_reply_unverifiable'); continue;
+          }
+        }
+        if (nextRecord.status === 'used' && Number.isInteger(nextRecord.inputMessageId)) {
+          nextRecord.usedHashThroughMessageId = nextRecord.inputMessageId;
+          nextRecord.usedHash = prefixHash(after.filter(message => message.messageId <= nextRecord.inputMessageId));
+        }
+        retained.push(nextRecord);
+      }
+
+      const cancelledTaskIds = [];
+      if (task && ['running', 'retrying'].includes(task.status)) {
+        const inputStillPresent = !task.anchor.inputFingerprint || after.some(message => message.role === 'user'
+          && message.messageId === task.anchor.inputMessageId
+          && inputFingerprint(message) === task.anchor.inputFingerprint);
+        if (!matches(task.anchor) || !inputStillPresent) {
+          cancelledTaskIds.push(task.id);
+          cancelledTasks.push({ id: task.id, sourceMessageId: task.anchor.sourceMessageId ?? null,
+            usedMessageId: null, reason: inputStillPresent ? 'source_changed' : 'input_removed_or_changed' });
+          cancelTask();
+        }
+      }
+      const expected = target();
+      const active = expected ? retained.findLast(record => valid(record, expected)) ?? null : null;
+      const patch = {
+        outlineHistory: retained,
+        activeOutline: active?.fullTag ?? '',
+        outlineSourceMessageId: active?.sourceMessageId ?? null,
+        outlineRevision: active?.sequence ?? null,
+        rawText: active?.fullTag ?? '',
+      };
+      const changed = JSON.stringify(old.outlineHistory) !== JSON.stringify(retained)
+        || old.activeOutline !== patch.activeOutline
+        || old.outlineSourceMessageId !== patch.outlineSourceMessageId
+        || old.outlineRevision !== patch.outlineRevision
+        || old.rawText !== patch.rawText;
+      if (changed) update(patch);
+      const result = { retainedIds: retained.map(record => record.id), returnedToReadyIds: returnedToReady,
+        prunedIds: pruned.map(entry => entry.id), cancelledTaskIds, ambiguousIds: pruned
+          .filter(entry => entry.reason.includes('ambiguous')).map(entry => entry.id) };
+      if (pruned.length || returnedToReady.length || cancelledTaskIds.length) {
+        log.info?.('[剧情规划器][生命周期对账]', { operation, prunedCount: pruned.length,
+          returnedToReadyCount: returnedToReady.length, cancelledTaskCount: cancelledTaskIds.length,
+          pruned, returnedToReady: returnedEntries, cancelledTasks });
+      }
+      return result;
+    }
+    function reconcileObserved(current, operation) {
+      const result = reconcileMessages(observedMessages, current, operation);
+      observedMessages = structuredClone(current ?? []);
+      return result;
+    }
+    function revalidate() {
+      return reconcileObserved(readMessages() ?? [], 'SNAPSHOT');
     }
     function cancellable(job, operation, delay = null) {
       if (job.cancelled || job.epoch !== epoch || !matches(job.anchor)) return Promise.reject(new Error('规划已取消：聊天或配置已变化'));
@@ -2678,11 +2890,16 @@
           }
           if (job.cancelled || job.epoch !== epoch || !matches(anchor)) throw new Error('规划已取消：聊天或配置已变化');
           const old = state();
-          const history = old.outlineHistory.map(record => record.key === anchor.key && record.status === 'ready'
-            ? { ...record, status: 'superseded' } : record);
+          const replaced = old.outlineHistory.filter(record => record.key === anchor.key && record.status === 'ready');
+          const history = old.outlineHistory.filter(record => !(record.key === anchor.key && record.status === 'ready'));
+          if (replaced.length) log.info?.('[剧情规划器][生命周期清理]', { operation: 'manual_replan',
+            prunedCount: replaced.length, records: replaced.map(record => ({ id: record.id,
+              sourceMessageId: record.sourceMessageId ?? null, usedMessageId: record.usedMessageId ?? null,
+              reason: 'manual_replan_replaced' })) });
           const record = { id: uid(), sequence: Math.max(0, ...history.map(item => item.sequence || 0)) + 1,
             key: anchor.key, chatId: anchor.chatId, signature: anchor.signature, sourceHash: anchor.sourceHash,
             sourceMessageId: anchor.sourceMessageId, purpose: anchor.purpose, generatedPhase: phase,
+            inputFingerprint: anchor.inputFingerprint, inputMessageId: anchor.inputMessageId,
             fullTag: outline.fullTag, body: outline.body, status: 'ready', usedMessageId: null, createdAt: stamp() };
           history.push(record);
           job.status = 'ready';
@@ -2712,10 +2929,13 @@
       task.rejectPending?.(new Error('规划已取消：聊天或配置已变化'));
       task.promise.catch(() => {});
     }
-    function invalidate() {
+    function invalidate(operation = 'MESSAGE_UPDATED') {
+      const changes = operation === 'CHAT_CHANGED'
+        ? (observedMessages = structuredClone(readMessages() ?? []), { retainedIds: [], returnedToReadyIds: [], prunedIds: [], cancelledTaskIds: [], ambiguousIds: [] })
+        : reconcileObserved(readMessages() ?? [], operation);
       cancelTask(); epoch += 1; task = null; claim = null;
       recoveryChecked = false;
-      revalidate();
+      return changes;
     }
     async function ensureCurrent(type = 'normal') {
       if (destroyed || !getConfig().enabled) throw new Error('自动规划未启用');
@@ -2734,13 +2954,17 @@
       const anchor = target(type);
       const record = state().outlineHistory.find(item => item.id === id);
       if (!valid(record, anchor)) return false;
+      const inputLock = { inputFingerprint: record.inputFingerprint ?? anchor.inputFingerprint,
+        inputMessageId: record.inputMessageId ?? anchor.inputMessageId };
       claim = { id, chatId: state().chatId, messages: anchor.invocationMessages,
         invocationHash: prefixHash(anchor.invocationMessages), replacementFloor: anchor.replacementFloor };
-      update({ outlineHistory: state().outlineHistory.map(item => item.id === id ? { ...item, status: 'using' } : item) });
+      update({ outlineHistory: state().outlineHistory.map(item => item.id === id
+        ? { ...item, ...inputLock, status: 'using' } : item) });
       return true;
     }
-    function onMessage() {
+    function onMessage(operation = 'MESSAGE_RECEIVED') {
       const messages = readMessages();
+      reconcileObserved(messages, operation);
       const latest = messages.at(-1);
       const finalNarrative = isFinalNarrativeAssistant(messages);
       if (claim && claim.chatId === state().chatId && finalNarrative) {
@@ -2748,7 +2972,9 @@
         if (prefixHash(prefix) === claim.invocationHash
           && (claim.replacementFloor === null ? latest.messageId > (claim.messages.at(-1)?.messageId ?? -1) : latest.messageId >= claim.replacementFloor)) {
           update({ outlineHistory: state().outlineHistory.map(item => item.id === claim.id
-            ? { ...item, status: 'used', usedMessageId: latest.messageId, usedHash: prefixHash(messages), usedAt: stamp() } : item) });
+            ? { ...item, status: 'used', usedMessageId: latest.messageId,
+              usedHash: claim.invocationHash, usedHashThroughMessageId: claim.messages.at(-1)?.messageId ?? -1,
+              usedAt: stamp() } : item) });
           void persistCritical(epoch, claim.chatId);
           claim = null;
         }
@@ -2773,7 +2999,28 @@
       retryPersistence: () => persistCritical(epoch, state().chatId),
       getState: state,
       clearClaim() { claim = null; },
-      stopCurrent() { claim = null; if (task?.phase === 'current') cancelTask(); },
+      stopCurrent() {
+        const stoppedClaim = claim;
+        claim = null;
+        if (task?.phase === 'current') cancelTask();
+        if (!stoppedClaim) return;
+        const old = state();
+        const record = old.outlineHistory.find(item => item.id === stoppedClaim.id);
+        if (!record || record.status !== 'using') return;
+        const usedMessage = Number.isInteger(record.usedMessageId)
+          ? readMessages().find(message => message.messageId === record.usedMessageId && message.role === 'assistant') : null;
+        const status = usedMessage ? 'used' : 'ready';
+        update({ outlineHistory: old.outlineHistory.map(item => {
+          if (item.id !== record.id) return item;
+          if (status === 'used') return { ...item, status };
+          const next = { ...item, status };
+          delete next.usedMessageId;
+          delete next.usedHash;
+          delete next.usedHashThroughMessageId;
+          delete next.usedAt;
+          return next;
+        }) });
+      },
       destroy() { cancelTask(); destroyed = true; epoch += 1; claim = null; },
     };
   }
@@ -2887,7 +3134,7 @@
     const scheduler = {
       getStatus: lifecycle.getStatus,
       schedule: () => lifecycle.manual(),
-      changeChat: () => lifecycle.invalidate(),
+      changeChat: () => lifecycle.invalidate('CHAT_CHANGED'),
       destroy: () => lifecycle.destroy(),
     };
     const gate = {
@@ -2932,19 +3179,23 @@
       mainGenerationActive = false; mainGenerationStopped = true;
       lifecycle.stopCurrent();
     });
-    for (const eventKey of ['MESSAGE_RECEIVED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_DELETED']) {
-      subscribe(globals.tavern_events[eventKey], () => {
+    const messageEventNames = new Set();
+    for (const eventKey of ['MESSAGE_RECEIVED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED', 'MESSAGE_DELETED']) {
+      const eventName = globals.tavern_events[eventKey];
+      if (typeof eventName !== 'string' || messageEventNames.has(eventName)) continue;
+      messageEventNames.add(eventName);
+      subscribe(eventName, () => {
         lastPreparedRequest = null;
         panel?.invalidatePreview();
         if (eventKey === 'MESSAGE_RECEIVED' || eventKey === 'MESSAGE_SWIPED') {
-          if (!mainGenerationActive && !mainGenerationStopped) lifecycle.onMessage();
+          if (!mainGenerationActive && !mainGenerationStopped) lifecycle.onMessage(eventKey);
         }
-        else lifecycle.invalidate();
+        else lifecycle.invalidate(eventKey);
       });
     }
     subscribe(globals.tavern_events.CHAT_CHANGED, () => {
       mainGenerationActive = false; mainGenerationStopped = false;
-      lifecycle.invalidate(); lastSentPrompt = null; lastPreparedRequest = null; panel?.invalidatePreview();
+      lifecycle.invalidate('CHAT_CHANGED'); lastSentPrompt = null; lastPreparedRequest = null; panel?.invalidatePreview();
     });
 
     const onPageHide = () => runtime.destroy();

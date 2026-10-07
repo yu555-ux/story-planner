@@ -111,7 +111,8 @@ test('native host maps SillyTavern chat messages to planner snapshots without he
   const { context } = contextFixture();
   const host = createNativeHost(context);
   assert.equal(host.getLastMessageId(), 1);
-  assert.deepEqual(host.getChatMessages('0-1', { hide_state: 'unhidden', include_swipes: false }), [
+  assert.deepEqual(host.getChatMessages('0-1', { hide_state: 'unhidden', include_swipes: false })
+    .map(({ message_id, role, message, is_hidden }) => ({ message_id, role, message, is_hidden })), [
     { message_id: 0, role: 'assistant', message: '角色开场白', is_hidden: false },
     { message_id: 1, role: 'user', message: '玩家行动', is_hidden: false },
   ]);
@@ -422,6 +423,7 @@ test('result view exposes only the current saved outline body', () => {
     status: 'ready',
     rawText: '模型前言<outline>旧细纲</outline>模型尾注',
     activeOutline: '<outline>\n第一幕：雨夜相遇\n</outline>',
+    outlineHistory: [{ id: 'current', status: 'ready', fullTag: '<outline>\n第一幕：雨夜相遇\n</outline>', body: '第一幕：雨夜相遇' }],
     lastError: '此前的请求失败',
   });
   assert.equal(view.outlineBody, '第一幕：雨夜相遇');
@@ -479,4 +481,71 @@ test('native host mounts the wand entry when the menu appears after startup', ()
   assert.equal(menu.children[0]?.children[0]?.children[1]?.textContent, '剧情规划器');
   assert.equal(disconnected, true);
   host.destroy();
+});
+
+test('native snapshots preserve message identity across deletion shifts and fingerprint prompt attachments', () => {
+  const { context } = contextFixture();
+  context.chat = [
+    { mes: '开场', is_user: false, is_system: false },
+    { mes: '同一正文', is_user: true, is_system: false, extra: { image: 'uploads/first.png', timestamp: 100 } },
+    { mes: '同一正文', is_user: true, is_system: false, extra: { image: 'uploads/first.png', timestamp: 200 } },
+  ];
+  const host = createNativeHost(context);
+  const before = host.getChatMessages('0-2');
+  assert.deepEqual(before.map(message => message.message_id), [0, 1, 2]);
+  assert.ok(before[1].message_fingerprint);
+  assert.ok(before[1].input_fingerprint);
+  assert.equal(before[1].message_fingerprint, before[2].message_fingerprint);
+  assert.equal(before[1].input_fingerprint, before[2].input_fingerprint);
+
+  context.chat.splice(1, 1);
+  const afterMiddleDelete = host.getChatMessages('0-1');
+  assert.deepEqual(afterMiddleDelete.map(message => message.message_id), [0, 1]);
+  assert.equal(afterMiddleDelete[1].message_fingerprint, before[2].message_fingerprint);
+
+  context.chat.splice(1, 1);
+  const afterTailDelete = host.getChatMessages('0-0');
+  assert.deepEqual(afterTailDelete.map(message => message.message_fingerprint), [before[0].message_fingerprint]);
+  host.destroy();
+});
+
+test('native message input fingerprint changes when a prompt attachment changes', () => {
+  const { context } = contextFixture();
+  context.chat = [{ mes: '看这张图', is_user: true, is_system: false, extra: { image: 'uploads/first.png' } }];
+  const host = createNativeHost(context);
+  const before = host.getChatMessages('0-0')[0];
+  context.chat[0].extra.image = 'uploads/second.png';
+  const after = host.getChatMessages('0-0')[0];
+  assert.notEqual(after.input_fingerprint, before.input_fingerprint);
+  assert.notEqual(planner.buildSnapshot([after]).messages[0].inputFingerprint,
+    planner.buildSnapshot([before]).messages[0].inputFingerprint);
+  host.destroy();
+});
+
+test('native host accepts the host-provided message edited event and exposes its constant', () => {
+  const { context, listeners } = contextFixture();
+  context.eventTypes.MESSAGE_EDITED = 'message_edited';
+  delete context.eventTypes.MESSAGE_UPDATED;
+  assert.deepEqual(inspectHostCapabilities(context), { platform: 'sillytavern', ok: true, missing: [] });
+  const host = createNativeHost(context);
+  assert.equal(host.tavern_events.MESSAGE_EDITED, 'message_edited');
+  host.eventOn(host.tavern_events.MESSAGE_EDITED, () => {});
+  assert.equal(listeners.has('message_edited'), true);
+  host.destroy();
+});
+
+test('panel view model exposes only ready, using, and used outlines and hides pending candidates', () => {
+  const view = planner.buildPanelViewModel({ enabled: true }, {
+    activeOutline: '<outline>当前细纲</outline>',
+    outlineHistory: [
+      { id: 'invalid', status: 'invalid', body: '不应展示的失效正文' },
+      { id: 'superseded', status: 'superseded', body: '不应展示的替代正文' },
+      { id: 'candidate', status: 'ready', inputPending: true, body: '等待玩家输入的候选' },
+      { id: 'ready', status: 'ready', fullTag: '<outline>当前细纲</outline>', body: '当前细纲' },
+      { id: 'used', status: 'used', body: '已使用细纲' },
+    ],
+  });
+  assert.deepEqual(view.outlineHistory.map(record => record.id), ['ready', 'used']);
+  assert.equal(view.outlineBody, '当前细纲');
+  assert.doesNotMatch(JSON.stringify(view), /invalid|superseded|候选|不应展示/);
 });

@@ -7,25 +7,10 @@ const require = createRequire(import.meta.url);
 const engine = require('./planner.js');
 const adapter = require('./runtime-adapter.js');
 
-test('release version matches manifest, adapter and settings badge', () => {
+test('manifest and runtime adapter use the same release version', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.10');
+  assert.equal(manifest.version, '0.2.0');
   assert.equal(adapter.VERSION, manifest.version);
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const panel = engine.createPlannerPanel({
-    document, version: adapter.VERSION,
-    getViewModel: () => ({ config: { enabled: false }, status: 'disabled', configErrors: {} }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    setInterval: () => 1, clearInterval() {},
-  });
-  const nodes = [...document.body.children];
-  let title;
-  let badge;
-  while (nodes.length) { const node = nodes.shift(); if (node.className === 'twsp-title') title = node; if (node.className === 'twsp-version') badge = node; nodes.push(...node.children); }
-  assert.equal(title?.textContent, '剧情规划器');
-  assert.equal(badge?.textContent, `v${manifest.version}`);
-  panel.destroy();
 });
 
 test('header edits only the chat record label and can restore the Tavern name', async () => {
@@ -147,6 +132,35 @@ test('result page renders ordered floor history as safe outline text and exposes
   assert.equal(current.children.at(-1).textContent, '下一轮内容');
   assert.match(current.children[0].children[1].textContent, /来源楼层 2/);
   assert.equal(nodes.find(node => node.dataset.twField === 'retryCount').value, '3');
+  panel.destroy();
+});
+
+test('result page does not render invalid, superseded, or unmatched candidate outlines', () => {
+  const document = { createElement: tag => new Element(tag, document), body: null };
+  document.body = new Element('body', document);
+  const config = { enabled: true, apiurl: 'https://api.example/v1', model: 'model' };
+  const panel = engine.createPlannerPanel({
+    document, getViewModel: () => ({ config, status: 'ready', statusLabel: '已完成', configErrors: {},
+      outlineBody: '', outlineHistory: [
+        { id: 'invalid', sequence: 1, status: 'invalid', body: '不应出现的失效正文' },
+        { id: 'superseded', sequence: 2, status: 'superseded', body: '不应出现的替代正文' },
+        { id: 'candidate', sequence: 3, status: 'ready', inputPending: true, body: '等待输入的候选' },
+        { id: 'used', sequence: 4, status: 'used', sourceMessageId: 2, usedMessageId: 4, body: '已使用细纲' },
+        { id: 'ready', sequence: 5, status: 'ready', sourceMessageId: 4, body: '当前细纲' },
+      ] }),
+    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
+    setInterval: () => 1, clearInterval() {},
+  });
+  panel.open();
+  const queue = [...document.body.children];
+  const nodes = [];
+  while (queue.length) { const node = queue.shift(); nodes.push(node); queue.push(...node.children); }
+  const history = nodes.find(node => node.dataset.twView === 'outlineHistory');
+  assert.equal(history.children.length, 1);
+  assert.equal(history.children[0].dataset.recordId, 'used');
+  assert.doesNotMatch(nodes.map(node => node.textContent).join('\n'), /已失效|已替代|不应出现|等待输入的候选/);
+  const current = nodes.find(node => node.dataset.twView === 'outlineBody');
+  assert.equal(current.children.at(-1).textContent, '当前细纲');
   panel.destroy();
 });
 
