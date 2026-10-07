@@ -41,6 +41,77 @@ test('failure notices distinguish HTTP status, missing tool calls, missing outli
   assert.equal(engine.parsePlannerResult('<outline>普通文本</outline>', 'game_content').error, '规划 API 未返回 game_content 工具调用');
 });
 
+test('native stop cancels background planning, restores send controls, and requires rescue', async () => {
+  const listeners = new Map();
+  const events = { MESSAGE_RECEIVED: 'received', CHAT_CHANGED: 'changed', GENERATION_STARTED: 'started',
+    GENERATION_ENDED: 'ended', GENERATION_STOPPED: 'stopped' };
+  const emit = name => { for (const listener of listeners.get(name) ?? []) listener(); };
+  const messages = [
+    { message_id: 0, role: 'assistant', message: '开场' },
+    { message_id: 1, role: 'user', message: '玩家行动' },
+    { message_id: 2, role: 'assistant', message: '上一轮回复' },
+  ];
+  const preset = { id: 'simple', name: '简单规划', raw: {},
+    prompts: [{ identifier: 'planner', name: '规划', role: 'system', content: '生成细纲', enabled: true }],
+    promptOrder: [{ identifier: 'planner', enabled: true }] };
+  let chatState = {};
+  const scriptState = { plannerPresets: [preset], activePlannerPresetId: preset.id };
+  let releaseFirst;
+  let releaseManual;
+  let calls = 0;
+  const buttons = [];
+  const host = {
+    console: { info() {}, warn() {}, error() {} },
+    tavern_events: events,
+    eventOn(name, listener) {
+      const set = listeners.get(name) ?? new Set(); set.add(listener); listeners.set(name, set);
+      return { stop() { set.delete(listener); } };
+    },
+    getLastMessageId: () => messages.length - 1,
+    getChatMessages: range => {
+      const [first, last] = range.split('-').map(Number);
+      return messages.slice(first, last + 1);
+    },
+    getVariables: ({ type }) => type === 'chat' ? chatState : scriptState,
+    updateVariablesWith: (fn, { type }) => {
+      if (type === 'chat') chatState = fn(chatState);
+      else Object.assign(scriptState, fn(scriptState));
+    },
+    stopGenerationById() {},
+    substitudeMacros: value => value,
+    generateRaw: () => {
+      calls += 1;
+      if (calls === 1) return new Promise(resolve => { releaseFirst = resolve; });
+      if (calls === 3) return new Promise(resolve => { releaseManual = resolve; });
+      return Promise.resolve({ choices: [{ message: { content: '<outline>补救细纲</outline>' } }] });
+    },
+    setPlannerSendBusy(value) { buttons.push(value); if (!value) emit(events.GENERATION_ENDED); return true; },
+  };
+  const runtime = engine.createTavernRuntime(host, { enabled: true, apiurl: 'https://api.example/v1',
+    key: 'secret', model: 'planner', retryCount: 0, timeoutSeconds: 20 });
+  emit(events.MESSAGE_RECEIVED);
+  for (let attempt = 0; attempt < 30 && calls < 1; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(buttons, [true]);
+  emit(events.GENERATION_STOPPED);
+  assert.deepEqual(buttons, [true, false]);
+  assert.equal(chatState.__tw_story_planner_v1.lastTask.status, 'cancelled');
+  releaseFirst({ choices: [{ message: { content: '<outline>迟到细纲</outline>' } }] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(chatState.__tw_story_planner_v1.outlineHistory.some(item => item.body === '迟到细纲'), false);
+  messages.push({ message_id: 3, role: 'user', message: '继续' });
+  assert.equal((await runtime.gate.ensureCurrentOutline({ chatIdentity: runtime.gate.getChatIdentity() })).body, '补救细纲');
+  assert.equal(calls, 2);
+  runtime.schedule('manual');
+  for (let attempt = 0; attempt < 30 && calls < 3; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(buttons.at(-1), true);
+  emit(events.CHAT_CHANGED);
+  assert.equal(buttons.at(-1), false, 'chat switch must release planner-owned controls');
+  releaseManual({ choices: [{ message: { content: '<outline>切换后的迟到细纲</outline>' } }] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(chatState.__tw_story_planner_v1.outlineHistory.some(item => item.body === '切换后的迟到细纲'), false);
+  runtime.destroy();
+});
+
 test('native runtime waits for initial planning, persists the outline, and injects it before chat generation', async () => {
   const listeners = new Map();
   const events = {
@@ -55,6 +126,7 @@ test('native runtime waits for initial planning, persists the outline, and injec
   };
   const apiCalls = [];
   const notices = [];
+  const buttonState = [];
   const context = {
     chat: [
       { mes: '角色开场白', is_user: false, is_system: false },
@@ -72,6 +144,8 @@ test('native runtime waits for initial planning, persists the outline, and injec
       emit(name, event) { for (const handler of listeners.get(name) ?? []) handler(event); },
     },
     saveMetadataDebounced() {}, saveSettingsDebounced() {},
+    deactivateSendButtons() { buttonState.push('busy'); },
+    activateSendButtons() { buttonState.push('ready'); },
     substituteParams(value) {
       return ({ '{{persona}}': 'Persona', '{{user}}': '玩家', '{{char}}': '角色', '{{personality}}': '性格', '{{scenario}}': '场景', '{{mesExamples}}': '示例' })[value] ?? value;
     },
@@ -89,7 +163,7 @@ test('native runtime waits for initial planning, persists the outline, and injec
       },
     },
   };
-  const document = { querySelector() { return null; } };
+  const document = { querySelector() { return null; }, addEventListener() {}, removeEventListener() {} };
   const window = { document, SillyTavern: { getContext: () => context }, setInterval, clearInterval, addEventListener() {}, removeEventListener() {},
     toastr: { error: message => notices.push(message) },
     fetch: async (_url, options) => {
@@ -122,7 +196,10 @@ test('native runtime waits for initial planning, persists the outline, and injec
   context.eventSource.emit(events.GENERATION_ENDED);
   for (let attempt = 0; attempt < 40 && apiCalls.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
   assert.equal(apiCalls.length, 2);
+  assert.ok(buttonState.includes('busy'), 'next planning must occupy the native send controls');
   assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '<outline>下一轮细纲</outline>');
+  for (let attempt = 0; attempt < 40 && buttonState.at(-1) !== 'ready'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
+  assert.equal(buttonState.at(-1), 'ready', 'planning completion must release native send controls');
   context.chat.push({ mes: '玩家的第二步', is_user: true, is_system: false });
   await gate.interceptor([], 8192, immediate => { abortImmediate = immediate; }, 'normal');
   assert.equal(abortImmediate, false);

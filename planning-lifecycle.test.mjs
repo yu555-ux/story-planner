@@ -574,6 +574,8 @@ test('stopping current foreground planning cancels it without stopping backgroun
   const pendingCurrent = foreground.life.ensureCurrent();
   await Promise.resolve();
   foreground.life.stopCurrent();
+  assert.equal(foreground.state().lastTask.status, 'cancelled');
+  assert.equal(engine.buildPanelViewModel({ enabled: true }, foreground.state(), foreground.life.getStatus()).status, 'idle');
   releaseCurrent(result('停止后迟到的细纲'));
   await assert.rejects(pendingCurrent);
   assert.equal(foreground.state().outlineHistory.length, 0);
@@ -597,6 +599,35 @@ test('stopping current foreground planning cancels it without stopping backgroun
   for (let attempt = 0; attempt < 30 && background.state().outlineHistory.length < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
   assert.equal(background.state().outlineHistory.some(record => record.body === '后台下一轮'), true);
   background.life.destroy();
+});
+
+test('stopping planner-owned next task rejects its late result and rescues on the next send', async () => {
+  let calls = 0;
+  let releaseNext;
+  const phases = [];
+  const f = fixture(() => {
+    calls += 1;
+    return calls === 2 ? new Promise(resolve => { releaseNext = resolve; }) : Promise.resolve(result(`细纲${calls}`));
+  }, { retryCount: 0 }, { onTaskChange: status => phases.push(status) });
+  const first = await f.life.ensureCurrent();
+  f.life.markUsing(first.id);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '第一轮回复' });
+  f.life.onMessage();
+  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.life.getStatus().phase, 'next');
+  assert.equal(phases.at(-1).phase, 'next');
+  assert.equal(phases.at(-1).running, true);
+  f.life.stopActivePlanning();
+  assert.equal(phases.at(-1).running, false);
+  assert.equal(f.state().lastTask.status, 'cancelled');
+  assert.equal(engine.buildPanelViewModel({ enabled: true }, f.state(), f.life.getStatus()).status, 'idle');
+  releaseNext(result('不应保存的迟到细纲'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.state().outlineHistory.some(item => item.body === '不应保存的迟到细纲'), false);
+  assert.equal(f.notices.length, 0);
+  f.messages.push({ messageId: 3, role: 'user', content: '下一步' });
+  assert.equal((await f.life.ensureCurrent()).body, '细纲3');
+  f.life.destroy();
 });
 
 test('stopping after outline injection restores ready or last-used state', async () => {

@@ -71,6 +71,81 @@ test('host capability inspection keeps the SillyTavern path and checks the Tauri
   assert.deepEqual(inspectHostCapabilities(noMetadataSave, { window: tauriWindow }).missing, ['context.saveMetadata']);
 });
 
+test('planner busy uses native controls and blocks send click and send-on-enter without losing text', () => {
+  const { context } = contextFixture();
+  const listeners = new Map();
+  const document = {
+    addEventListener(name, handler, capture) { assert.equal(capture, true); listeners.set(name, handler); },
+    removeEventListener(name, handler) { if (listeners.get(name) === handler) listeners.delete(name); },
+  };
+  let shown = 0;
+  let hidden = 0;
+  context.deactivateSendButtons = () => { shown += 1; };
+  context.activateSendButtons = () => { hidden += 1; };
+  context.shouldSendOnEnter = () => true;
+  const host = createNativeHost(context, { document, window: {} });
+  assert.equal(host.setPlannerSendBusy(true), true);
+  assert.equal(shown, 1);
+  const blocked = { prevented: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() {} };
+  listeners.get('click')({ ...blocked, type: 'click', target: { closest: selector => selector === '#send_but' ? {} : null },
+    preventDefault: () => { blocked.prevented = true; } });
+  assert.equal(blocked.prevented, true);
+  let keyBlocked = false;
+  listeners.get('keydown')({ type: 'keydown', key: 'Enter', shiftKey: false, isComposing: false,
+    target: { closest: selector => selector === '#send_textarea' ? {} : null },
+    preventDefault() { keyBlocked = true; }, stopImmediatePropagation() {} });
+  assert.equal(keyBlocked, true);
+  let ctrlEnterBlocked = false;
+  listeners.get('keydown')({ type: 'keydown', key: 'Enter', ctrlKey: true, shiftKey: false,
+    target: { closest: selector => selector === '#send_textarea' ? {} : null },
+    preventDefault() { ctrlEnterBlocked = true; }, stopImmediatePropagation() {} });
+  assert.equal(ctrlEnterBlocked, true, 'Ctrl+Enter can also send or regenerate in SillyTavern');
+  let shiftCtrlBlocked = false;
+  listeners.get('keydown')({ type: 'keydown', key: 'Enter', ctrlKey: true, shiftKey: true,
+    target: { closest: selector => selector === '#send_textarea' ? {} : null },
+    preventDefault() { shiftCtrlBlocked = true; }, stopImmediatePropagation() {} });
+  assert.equal(shiftCtrlBlocked, true);
+  assert.equal(host.setPlannerSendBusy(false), true);
+  assert.equal(hidden, 1);
+  host.destroy();
+  assert.equal(listeners.size, 0);
+});
+
+test('failed native busy acquisition leaves no planner input lock behind', () => {
+  const { context } = contextFixture();
+  const listeners = new Map();
+  const document = {
+    addEventListener(name, handler) { listeners.set(name, handler); },
+    removeEventListener(name) { listeners.delete(name); },
+  };
+  context.deactivateSendButtons = () => { throw new Error('host UI unavailable'); };
+  context.activateSendButtons = () => {};
+  const host = createNativeHost(context, { document, window: {} });
+  assert.equal(host.setPlannerSendBusy(true), false);
+  assert.equal(host.isPlannerSendBusy(), false);
+  assert.equal(listeners.size, 0);
+  host.destroy();
+});
+
+test('handoff to Tavern generation removes planner guard without restoring the send button', () => {
+  const { context } = contextFixture();
+  let restored = 0;
+  context.deactivateSendButtons = () => {};
+  context.activateSendButtons = () => { restored += 1; };
+  const listeners = new Map();
+  const document = {
+    addEventListener(name, handler) { listeners.set(name, handler); },
+    removeEventListener(name) { listeners.delete(name); },
+  };
+  const host = createNativeHost(context, { document, window: {} });
+  host.setPlannerSendBusy(true);
+  host.setPlannerSendBusy(false, { hostGenerating: true });
+  assert.equal(restored, 0);
+  assert.equal(host.isPlannerSendBusy(), false);
+  assert.equal(listeners.size, 0);
+  host.destroy();
+});
+
 function menuElement(tag) {
   const handlers = new Map();
   return {

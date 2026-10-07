@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);
@@ -248,6 +248,44 @@
     let button = null;
     let menuContainer = null;
     let menuObserver = null;
+    let plannerSendBusy = false;
+
+    function blockPlannerSend(event) {
+      if (!plannerSendBusy) return;
+      const target = event.target;
+      const sendClick = event.type === 'click' && Boolean(target?.closest?.('#send_but'));
+      const sendEnter = event.type === 'keydown' && event.key === 'Enter' && !event.isComposing
+        && Boolean(target?.closest?.('#send_textarea'))
+        && (event.ctrlKey || (!event.shiftKey && !event.altKey && liveContext().shouldSendOnEnter?.() === true));
+      if (!sendClick && !sendEnter) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    function setPlannerSendBusy(busy, { hostGenerating = false } = {}) {
+      if (busy === plannerSendBusy) return true;
+      if (busy) {
+        if (typeof liveContext().deactivateSendButtons !== 'function'
+          || typeof liveContext().activateSendButtons !== 'function'
+          || typeof document?.addEventListener !== 'function') return false;
+        plannerSendBusy = true;
+        document.addEventListener('click', blockPlannerSend, true);
+        document.addEventListener('keydown', blockPlannerSend, true);
+        try { liveContext().deactivateSendButtons(); }
+        catch {
+          plannerSendBusy = false;
+          document.removeEventListener?.('click', blockPlannerSend, true);
+          document.removeEventListener?.('keydown', blockPlannerSend, true);
+          return false;
+        }
+      } else {
+        plannerSendBusy = false;
+        document?.removeEventListener?.('click', blockPlannerSend, true);
+        document?.removeEventListener?.('keydown', blockPlannerSend, true);
+        if (!hostGenerating) liveContext().activateSendButtons?.();
+      }
+      return true;
+    }
 
     function currentMetadata() {
       const metadata = liveContext().chatMetadata;
@@ -602,6 +640,8 @@
         return Array.isArray(entries) ? entries.map(item => typeof item === 'string' ? item : item?.id).filter(value => typeof value === 'string') : [];
       },
       stopGenerationById(id) { controllers.get(id)?.abort(); return true; },
+      setPlannerSendBusy,
+      isPlannerSendBusy() { return plannerSendBusy; },
       substitudeMacros(value) { return liveContext().substituteParams?.(value) ?? value; },
       async getCharacter() {
         const current = liveContext();
@@ -638,6 +678,7 @@
         return Object.entries(entries).map(([uid, entry]) => convertWorldInfoEntry(entry, uid)).filter(Boolean);
       },
       destroy() {
+        setPlannerSendBusy(false);
         for (const dispose of [...activeListeners]) dispose();
         for (const controller of controllers.values()) controller.abort();
         controllers.clear();

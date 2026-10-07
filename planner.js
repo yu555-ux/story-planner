@@ -2494,7 +2494,7 @@
   // does not change a next-round plan; edits to the prefix do.
   function createPlanningLifecycle(options) {
     const { readMessages, readState, writeState, getConfig, getSignature, run,
-      classifyFailure, extractOutline, hash, stop, notify, log, persistState } = options;
+      classifyFailure, extractOutline, hash, stop, notify, log, persistState, onTaskChange } = options;
     let epoch = 0;
     let destroyed = false;
     let task = null;
@@ -2502,6 +2502,10 @@
     let recoveryChecked = false;
     let persistenceQueue = Promise.resolve();
     let observedMessages = structuredClone(readMessages() ?? []);
+    const taskStatus = () => ({ epoch, destroyed, running: ['running', 'retrying'].includes(task?.status), pending: false,
+      generationId: task?.generationId ?? null, phase: task?.phase, attempt: task?.attempt,
+      persistenceError: state().persistenceError ?? null });
+    const reportTaskChange = () => onTaskChange?.(taskStatus());
     const uid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
     const stamp = () => new Date().toISOString();
     const prefixHash = messages => hash(JSON.stringify(messages));
@@ -2911,23 +2915,36 @@
           if (job.epoch !== epoch || !matches(anchor)) throw new Error('规划已取消：聊天或配置已变化');
           return record;
         } catch (error) {
-          job.status = 'failed';
+          job.status = job.cancelled ? 'cancelled' : 'failed';
           if (!job.cancelled && job.epoch === epoch && matches(anchor)) {
             const failure = classifyFailure(error).message;
             update({ status: 'failed', lastError: `${phase === 'next' ? '下一轮' : '本轮'}：${failure}`, lastTask: taskInfo(job, 'failed', error) });
             if (phase === 'next') notify(`下一轮细纲生成失败：${failure} 将在下次发送前补救。`);
           }
           throw error;
+        } finally {
+          if (task === job) reportTaskChange();
         }
       })();
+      reportTaskChange();
       return job.promise;
     }
     function cancelTask() {
       if (!task || !['running', 'retrying'].includes(task.status)) return;
       task.cancelled = true;
+      task.status = 'cancelled';
       stop(task.generationId);
       task.rejectPending?.(new Error('规划已取消：聊天或配置已变化'));
       task.promise.catch(() => {});
+      reportTaskChange();
+    }
+    function cancelTaskByUser() {
+      if (!task || !['running', 'retrying'].includes(task.status)) return;
+      const stoppedTask = task;
+      cancelTask();
+      const old = state();
+      update({ status: old.activeOutline ? 'ready' : 'idle', lastError: null,
+        lastTask: taskInfo(stoppedTask, 'cancelled') });
     }
     function invalidate(operation = 'MESSAGE_UPDATED') {
       const changes = operation === 'CHAT_CHANGED'
@@ -2946,6 +2963,7 @@
       if (existing) return existing;
       if (task?.anchor.key === anchor.key && ['running', 'retrying'].includes(task.status)) {
         task.phase = 'current';
+        reportTaskChange();
         return task.promise;
       }
       return start(anchor, 'current');
@@ -2992,9 +3010,7 @@
     return { ensureCurrent, markUsing, onMessage, invalidate, identity, target, getCurrentTurn,
       getActive(type = 'normal') { revalidate(); return select(target(type)); },
       manual() { const anchor = target(); if (!anchor) return false; start(anchor, 'current').catch(() => {}); return true; },
-      getStatus: () => ({ epoch, destroyed, running: ['running', 'retrying'].includes(task?.status), pending: false,
-        generationId: task?.generationId ?? null, phase: task?.phase, attempt: task?.attempt,
-        persistenceError: state().persistenceError ?? null }),
+      getStatus: taskStatus,
       flushPersistence: () => persistenceQueue,
       retryPersistence: () => persistCritical(epoch, state().chatId),
       getState: state,
@@ -3002,7 +3018,7 @@
       stopCurrent() {
         const stoppedClaim = claim;
         claim = null;
-        if (task?.phase === 'current') cancelTask();
+        if (task?.phase === 'current') cancelTaskByUser();
         if (!stoppedClaim) return;
         const old = state();
         const record = old.outlineHistory.find(item => item.id === stoppedClaim.id);
@@ -3020,6 +3036,9 @@
           delete next.usedAt;
           return next;
         }) });
+      },
+      stopActivePlanning() {
+        cancelTaskByUser();
       },
       destroy() { cancelTask(); destroyed = true; epoch += 1; claim = null; },
     };
@@ -3114,6 +3133,23 @@
       if (!Number.isInteger(last) || last < 0) return [];
       return buildSnapshot(globals.getChatMessages(`0-${last}`, { hide_state: 'unhidden', include_swipes: false })).messages;
     }
+    let mainGenerationActive = false;
+    let mainGenerationStopped = false;
+    let plannerOwnsSendControls = false;
+    let releasingPlannerControls = false;
+    function syncPlannerSendControls(status, { hostGenerating = mainGenerationActive } = {}) {
+      const shouldOwn = status.running && !hostGenerating;
+      if (shouldOwn === plannerOwnsSendControls) return;
+      if (shouldOwn) {
+        plannerOwnsSendControls = globals.setPlannerSendBusy?.(true) === true;
+        if (!plannerOwnsSendControls) log.warn?.('[剧情规划器][发送键] 当前宿主无法呈现规划忙碌状态');
+        return;
+      }
+      plannerOwnsSendControls = false;
+      releasingPlannerControls = true;
+      try { globals.setPlannerSendBusy?.(false, { hostGenerating }); }
+      finally { releasingPlannerControls = false; }
+    }
     const lifecycle = createPlanningLifecycle({
       readMessages: readAllMessages, readState: currentPlanningState,
       writeState: value => globals.updateVariablesWith(variables => ({ ...variables, [STATE_KEY]: value }), { type: 'chat' }),
@@ -3130,6 +3166,7 @@
       classifyFailure: classifyPlannerFailure, extractOutline, hash: fnv1a,
       stop: id => { if (id) globals.stopGenerationById(id); },
       notify: message => globals.notifyError?.(message), log,
+      onTaskChange: syncPlannerSendControls,
     });
     const scheduler = {
       getStatus: lifecycle.getStatus,
@@ -3163,19 +3200,24 @@
       if (typeof subscription?.stop === 'function') disposers.push(() => subscription.stop());
     }
 
-    let mainGenerationActive = false;
-    let mainGenerationStopped = false;
     subscribe(globals.tavern_events.GENERATION_STARTED, (type, _options, dryRun) => {
       if (dryRun || ['quiet', 'impersonate'].includes(type)) return;
       mainGenerationActive = true; mainGenerationStopped = false;
+      syncPlannerSendControls(lifecycle.getStatus());
     });
     subscribe(globals.tavern_events.GENERATION_ENDED, () => {
+      if (releasingPlannerControls) return;
       mainGenerationActive = false;
       // A microtask allows the final message/event to settle; stopped generations
       // must not prefetch an outline from a partial reply.
       queueMicrotask(() => { if (!destroyed && !mainGenerationActive && !mainGenerationStopped) lifecycle.onMessage(); });
     });
     subscribe(globals.tavern_events.GENERATION_STOPPED, () => {
+      if (plannerOwnsSendControls) {
+        mainGenerationStopped = true;
+        lifecycle.stopActivePlanning();
+        return;
+      }
       mainGenerationActive = false; mainGenerationStopped = true;
       lifecycle.stopCurrent();
     });
