@@ -9,7 +9,7 @@ const adapter = require('./runtime-adapter.js');
 
 test('manifest and runtime adapter use the same release version', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.2.1');
+  assert.equal(manifest.version, '0.2.2');
   assert.equal(adapter.VERSION, manifest.version);
 });
 

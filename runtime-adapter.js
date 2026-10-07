@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.2.1';
+  const VERSION = '0.2.2';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);

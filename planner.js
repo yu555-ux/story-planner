@@ -1616,9 +1616,9 @@
     modelCombobox.append(modelInput, modelToggle, modelMenu);
     modelControls.append(modelCombobox, fetchButton);
     modelField.append(modelLabel, modelControls);
-    const timeout = field('请求超时（秒）', 'timeoutSeconds', 'number');
+    const timeout = field('单次规划请求超时（秒）', 'timeoutSeconds', 'number');
     timeout.input.min = '1'; timeout.input.max = '600'; timeout.input.step = '1';
-    timeout.wrapper.append(element('small', 'twsp-hint', '本轮、下一轮及补救任务均共用此总时限，包含重试与等待。'));
+    timeout.wrapper.append(element('small', 'twsp-hint', '每次规划尝试（含首次请求和重试）单独计时；重试等待不计入。'));
     const retryCount = field('失败重试次数', 'retryCount', 'number');
     retryCount.input.min = '0'; retryCount.input.max = '10'; retryCount.input.step = '1';
     retryCount.wrapper.append(element('small', 'twsp-hint', '首次请求之外的重试次数；0 表示不自动重试。'));
@@ -2827,31 +2827,57 @@
     function revalidate() {
       return reconcileObserved(readMessages() ?? [], 'SNAPSHOT');
     }
-    function cancellable(job, operation, delay = null) {
-      if (job.cancelled || job.epoch !== epoch || !matches(job.anchor)) return Promise.reject(new Error('规划已取消：聊天或配置已变化'));
-      const remaining = job.deadline - Date.now();
-      if (remaining <= 0) return Promise.reject(new Error('请求超时'));
+    function isTaskCurrent(job) {
+      return !job.cancelled && job.epoch === epoch && matches(job.anchor);
+    }
+    function cancellable(job, operation) {
+      if (!isTaskCurrent(job)) return Promise.reject(new Error('规划已取消：聊天或配置已变化'));
+      const attempt = job.currentAttempt;
+      const remaining = attempt.deadline - Date.now();
+      if (remaining <= 0) {
+        attempt.timedOut = true;
+        return Promise.reject(new Error('请求超时'));
+      }
       let timer;
+      let rejectPending;
+      return new Promise((resolve, reject) => {
+        rejectPending = reject;
+        job.rejectPending = reject;
+        timer = setTimeout(() => {
+          attempt.timedOut = true;
+          try { stop(job.generationId); } catch { /* timeout must reject even if host cancellation fails */ }
+          reject(new Error('请求超时'));
+        }, remaining);
+        const work = Promise.resolve().then(() => {
+          if (!isTaskCurrent(job)) throw new Error('规划已取消：聊天或配置已变化');
+          if (attempt.timedOut || Date.now() >= attempt.deadline) throw new Error('请求超时');
+          return operation();
+        });
+        work.then(resolve, reject);
+      }).finally(() => {
+        clearTimeout(timer);
+        if (job.rejectPending === rejectPending) job.rejectPending = null;
+      });
+    }
+    function waitForRetry(job, delay) {
+      if (!isTaskCurrent(job)) return Promise.reject(new Error('规划已取消：聊天或配置已变化'));
       let waitTimer;
       let rejectPending;
       return new Promise((resolve, reject) => {
         rejectPending = reject;
         job.rejectPending = reject;
-        timer = setTimeout(() => { stop(job.generationId); reject(new Error('请求超时')); }, remaining);
-        const work = delay === null ? Promise.resolve().then(() => {
-          if (job.cancelled || job.epoch !== epoch || !matches(job.anchor)) throw new Error('规划已取消：聊天或配置已变化');
-          return operation();
-        })
-          : new Promise(done => { waitTimer = setTimeout(done, Math.min(delay, remaining)); });
-        work.then(resolve, reject);
+        waitTimer = setTimeout(() => {
+          if (!isTaskCurrent(job)) reject(new Error('规划已取消：聊天或配置已变化'));
+          else resolve();
+        }, delay);
       }).finally(() => {
-        clearTimeout(timer); clearTimeout(waitTimer);
+        clearTimeout(waitTimer);
         if (job.rejectPending === rejectPending) job.rejectPending = null;
       });
     }
     function retryable(error) {
       const code = classifyFailure(error).code;
-      return ['NETWORK', 'INVALID_RESPONSE', 'EMPTY_RESPONSE', 'OUTLINE_MISSING', 'OUTLINE_EMPTY',
+      return ['TIMEOUT', 'NETWORK', 'INVALID_RESPONSE', 'EMPTY_RESPONSE', 'OUTLINE_MISSING', 'OUTLINE_EMPTY',
         'TOOL_CALL_MISSING', 'TOOL_ARGS_INVALID', 'TOOL_CONTENT_EMPTY', 'HTTP_408', 'HTTP_429'].includes(code)
         || /^HTTP_5\d\d$/.test(code);
     }
@@ -2865,14 +2891,17 @@
       if (task && ['running', 'retrying'].includes(task.status)) cancelTask();
       const config = structuredClone(getConfig());
       const job = { id: uid(), anchor, phase, config, epoch, status: 'running', attempt: 0,
-        cancelled: false, deadline: Date.now() + config.timeoutSeconds * 1000 };
-      job.isCurrent = () => !job.cancelled && job.epoch === epoch && matches(anchor) && Date.now() < job.deadline;
+        cancelled: false, currentAttempt: null };
+      job.isTimedOut = () => job.currentAttempt !== null
+        && (job.currentAttempt.timedOut || Date.now() >= job.currentAttempt.deadline);
+      job.isCurrent = () => isTaskCurrent(job) && job.currentAttempt !== null && !job.isTimedOut();
       task = job;
       job.promise = (async () => {
         try {
           let result;
           let outline;
           for (let attempt = 1; attempt <= config.retryCount + 1; attempt += 1) {
+            job.currentAttempt = { deadline: Date.now() + config.timeoutSeconds * 1000, timedOut: false };
             job.attempt = attempt; job.status = attempt === 1 ? 'running' : 'retrying';
             job.generationId = `tw-planner-${job.id}-${attempt}`;
             update({ status: job.status, lastError: null, lastTask: taskInfo(job, job.status) });
@@ -2883,13 +2912,12 @@
               if (!outline.ok) throw new Error(outline.error);
               break;
             } catch (error) {
-              if (job.cancelled || job.epoch !== epoch || !matches(anchor)) throw new Error('规划已取消：聊天或配置已变化');
-              if (Date.now() >= job.deadline || error.message === '请求超时') throw new Error('请求超时');
+              if (!isTaskCurrent(job)) throw new Error('规划已取消：聊天或配置已变化');
               if (attempt > config.retryCount || !retryable(error)) throw error;
               job.status = 'retrying';
               update({ status: 'retrying', lastTask: taskInfo(job, 'retrying', error) });
               log.info?.('[剧情规划器][重试]', taskInfo(job, 'retrying', error));
-              await cancellable(job, null, options.retryDelayMs ?? Math.min(500 * attempt, 2000));
+              await waitForRetry(job, options.retryDelayMs ?? Math.min(500 * attempt, 2000));
             }
           }
           if (job.cancelled || job.epoch !== epoch || !matches(anchor)) throw new Error('规划已取消：聊天或配置已变化');
@@ -3091,12 +3119,16 @@
     }
 
     async function runJob(job, snapshot) {
+      function assertAttemptCurrent() {
+        if (job.isCurrent()) return;
+        throw new Error(job.isTimedOut() ? '请求超时' : '规划已取消：聊天或配置已变化');
+      }
       if (Object.keys(validateConfig(config)).length) throw new Error('API 设置不完整');
       const preset = activePreset();
       const generationType = job.reason === 'initial' ? 'initial' : 'normal';
       if (!hasEffectivePlannerPrompt(preset, generationType)) throw new Error('预设没有可发送的 Prompt，请先导入预设或新增并填写词块');
       const context = job.context ??= await readPlannerContext(globals, snapshot, generationType);
-      if (!job.isCurrent()) throw new Error('规划已取消：聊天或配置已变化');
+      assertAttemptCurrent();
       const final = job.prepared ??= prepareRequest(preset, context);
       if (final.diagnostics.some(issue => issue.includes('宏 {{last_maintext}} 未找到'))) {
         throw new Error('最新助手回复缺少 <maintext>/<content> 正文');
@@ -3115,16 +3147,19 @@
         ...promptSummary,
       });
       log.info?.(`[剧情规划器][API] 开始调用${generationType === 'initial' ? '初始规划请求' : '后续规划请求'}`);
+      assertAttemptCurrent();
       lastSentPrompt = { blocks: final.blocks, messages: final.request.ordered_prompts,
         diagnostics: final.diagnostics, request: structuredClone(final.request) };
       const raw = await globals.generateRaw({
         generation_id: job.generationId, should_stream: false, should_silence: true,
         max_chat_history: 0, custom_api: buildCustomApi(job.config ?? config), ...final.request,
       }).finally(() => { lastPreparedRequest = null; });
+      assertAttemptCurrent();
       const parsed = parsePlannerResult(raw, final.request.tools?.[0]?.function.name, classifySPresetCompatibility(preset));
       if (!parsed.ok) throw new Error(parsed.error);
       const outline = extractOutline(parsed.value.rawText);
       if (!outline.ok) throw new Error(outline.error);
+      assertAttemptCurrent();
       return parsed.value;
     }
 

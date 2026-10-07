@@ -166,22 +166,56 @@ test('editing an earlier floor invalidates a ready outline; late cancelled resul
   f.life.destroy();
 });
 
-test('total timeout covers all attempts; HTTP 404 is not retried', async () => {
+test('a timed out planning request retries with a fresh full request timeout', async () => {
+  let calls = 0;
+  const stopped = [];
+  const f = fixture(async () => {
+    calls += 1;
+    if (calls === 1) return new Promise(() => {});
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return result('第二次尝试成功');
+  }, { retryCount: 1, timeoutSeconds: 0.06 }, { stop: generationId => stopped.push(generationId) });
+  const outline = await f.life.ensureCurrent();
+  assert.equal(calls, 2);
+  assert.equal(outline.body, '第二次尝试成功');
+  assert.equal(f.state().lastTask.attempt, 2);
+  assert.equal(f.state().outlineHistory.length, 1);
+  assert.equal(stopped.length, 1);
+  assert.match(stopped[0], /-1$/);
+  f.life.destroy();
+});
+
+test('retry delay does not consume the next planning request timeout', async () => {
+  let calls = 0;
+  const f = fixture(async () => {
+    calls += 1;
+    if (calls === 1) return { rawText: '缺少细纲标签' };
+    await new Promise(resolve => setTimeout(resolve, 60));
+    return result('重试成功');
+  }, { retryCount: 1, timeoutSeconds: 0.1 }, { retryDelayMs: 60 });
+  const outline = await f.life.ensureCurrent();
+  assert.equal(calls, 2);
+  assert.equal(outline.body, '重试成功');
+  f.life.destroy();
+});
+
+test('every timed out attempt uses the configured retry count before final failure', async () => {
+  let calls = 0;
+  const f = fixture(async () => { calls += 1; return new Promise(() => {}); },
+    { retryCount: 2, timeoutSeconds: 0.02 });
+  await assert.rejects(f.life.ensureCurrent(), /请求超时/);
+  assert.equal(calls, 3);
+  assert.equal(f.state().lastTask.attempt, 3);
+  assert.equal(f.state().outlineHistory.length, 0);
+  f.life.destroy();
+});
+
+test('HTTP 404 is not retried', async () => {
   let calls = 0;
   const f = fixture(async () => { calls += 1; throw Object.assign(new Error('x'), { status: 404 }); });
   await assert.rejects(f.life.ensureCurrent());
   assert.equal(calls, 1);
   f.life.destroy();
-  let attempts = 0;
-  const timed = fixture(async () => {
-    attempts += 1;
-    await new Promise(resolve => setTimeout(resolve, 35));
-    return { rawText: '缺标签' };
-  }, { retryCount: 10, timeoutSeconds: 0.05 });
-  await assert.rejects(timed.life.ensureCurrent(), /请求超时/);
-  assert.ok(attempts <= 2);
-  assert.equal(timed.state().outlineHistory.length, 0);
-  timed.life.destroy();
 });
 
 test('cancelled planner requests do not retry or report a missing outline', async () => {
