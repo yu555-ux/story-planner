@@ -13,6 +13,8 @@
 
 从本仓库 `main` 安装的用户，可在扩展管理器直接更新并刷新页面。若旧安装指向其他仓库或分支，Git 更新不会自动切换来源；请先导出规划预设、备份 API 配置，再用上述地址重新安装。更新并刷新后，可在浏览器控制台的 `[剧情规划器][ready]` 日志中确认 `version: "0.2.0"`。已保存密钥会在密码框中以圆点遮罩显示，可直接替换；清空后保存会移除密钥。
 
+后续版本统一更新仓库默认分支 `main`。安装和更新时继续使用同一个 Git URL，并将 Branch or tag name 留空；无需跟随开发分支。
+
 也可以手动安装：将仓库检出到 `data/<用户>/extensions/tw-story-planner-v1/`，或 `public/scripts/extensions/third-party/tw-story-planner-v1/`，然后重启 SillyTavern。Git URL 安装器接收仓库和分支，不接收 GitHub 的仓库子目录链接。
 
 ## 迁移已有数据
