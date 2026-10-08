@@ -176,11 +176,17 @@
       'request', 'validation', 'timeout', 'transport', 'unknown'].includes(category) ? category : null;
   }
 
+  function reportedErrorCode(json) {
+    const code = json?.error?.code;
+    return ['backend_disconnected', 'PERMISSION_DENIED'].includes(code) ? code : null;
+  }
+
   function responseFailure(response, json, isTauri) {
     const failure = new Error('规划 API 请求失败');
     failure.hostStatus = response.status;
     failure.upstreamStatus = reportedUpstreamStatus(json);
     failure.upstreamCategory = reportedUpstreamCategory(json);
+    failure.providerCode = reportedErrorCode(json);
     failure.status = isTauri ? failure.upstreamStatus : reportedErrorStatus(json) ?? (response.ok ? null : response.status);
     failure.code = 'API_RESPONSE_ERROR';
     return failure;

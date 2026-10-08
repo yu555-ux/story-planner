@@ -133,8 +133,8 @@ test('Tauri host errors distinguish its HTTP status from a proven upstream statu
       assert.equal(error.status, upstreamStatus);
       assert.doesNotMatch(String(error), /private provider details/);
       const classified = planner.classifyPlannerFailure(error);
-      assert.equal(classified.code, upstreamStatus ? `HTTP_${upstreamStatus}` : 'API_RESPONSE_ERROR');
-      if (!upstreamStatus) assert.match(classified.message, /宿主 HTTP 502.*上游状态未知/);
+      assert.equal(classified.code, upstreamStatus ? `HTTP_${upstreamStatus}` : 'HOST_502');
+      if (!upstreamStatus) assert.match(classified.message, /宿主 HTTP 502.*上游状态未提供/);
       return true;
     });
     const rawDiagnostic = diagnostics.find(([name]) => name === '[剧情规划器][诊断][响应]')?.[1]?.raw;
@@ -154,14 +154,14 @@ test('Tauri direct 401, 403, and 404 remain host statuses when upstream status i
       assert.equal(error.hostStatus, hostStatus);
       assert.equal(error.status, null);
       assert.equal(error.upstreamStatus, null);
-      assert.match(planner.classifyPlannerFailure(error).message, new RegExp(`宿主 HTTP ${hostStatus}.*上游状态未知`));
+      assert.match(planner.classifyPlannerFailure(error).message, new RegExp(`宿主 HTTP ${hostStatus}.*上游.*未提供`));
       return true;
     });
     host.destroy();
   }
 });
 
-test('unknown Tauri host 502 does not retry; proven upstream 503 retries with the frozen request', async () => {
+test('Tauri host 502 and proven upstream 503 retry with the frozen request', async () => {
   for (const upstreamKnown of [false, true]) {
     const { context, window } = tauriFixture([]);
     const sentBodies = [];
@@ -199,12 +199,45 @@ test('unknown Tauri host 502 does not retry; proven upstream 503 retries with th
       assert.equal(sentBodies[0], sentBodies[1]);
     } else {
       await assert.rejects(lifecycle.ensureCurrent());
-      assert.equal(sentBodies.length, 1);
-      assert.match(state.lastError, /上游状态未知/);
+      assert.equal(sentBodies.length, 3);
+      assert.match(state.lastError, /酒馆宿主 HTTP 502.*上游状态未提供/);
+      assert.equal(state.lastTask.attempt, 3);
     }
     lifecycle.destroy();
     host.destroy();
   }
+});
+
+test('Tauri error hints identify backend disconnection and permission denial without provider text', async () => {
+  for (const { errorBody, status, expectedCode, expectedMessage } of [
+    { errorBody: { code: 'backend_disconnected', category: 'transport', message: 'private endpoint and key' },
+      status: 502, expectedCode: 'BACKEND_DISCONNECTED', expectedMessage: /后端连接已断开/ },
+    { errorBody: { code: 'PERMISSION_DENIED', category: 'authentication', message: 'private account details' },
+      status: 403, expectedCode: 'PERMISSION_DENIED', expectedMessage: /权限不足/ },
+    { errorBody: { category: 'authentication', message: 'private authorization details' },
+      status: 502, expectedCode: 'HOST_AUTH', expectedMessage: /认证或权限请求失败/ },
+  ]) {
+    const { context, window } = tauriFixture([]);
+    window.fetch = async () => Response.json({ error: errorBody }, { status });
+    const host = createNativeHost(context, { window, document: null });
+    await assert.rejects(host.generateRaw(plannerRequest()), error => {
+      const classified = planner.classifyPlannerFailure(error);
+      assert.equal(classified.code, expectedCode);
+      assert.match(classified.message, expectedMessage);
+      assert.doesNotMatch(classified.message, /private|endpoint|account|key/);
+      return true;
+    });
+    host.destroy();
+  }
+});
+
+test('a completion marked length is not accepted as a finished outline', () => {
+  const raw = { choices: [{ finish_reason: 'length', message: { tool_calls: [
+    { id: 'partial-call', type: 'function', function: { name: 'game_content', arguments: '{"content":"<outline>看似完整的细纲</outline>"}' } },
+  ] } }] };
+  const parsed = planner.parsePlannerResult(raw, 'game_content');
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.error, /未完成|输出上限/);
 });
 
 test('Tauri network and cancellation failures are classified without retryable secret text', async () => {

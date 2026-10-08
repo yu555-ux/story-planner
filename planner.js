@@ -736,6 +736,9 @@
   }
 
   function parsePlannerResult(raw, expectedToolName = null, compatibility = null) {
+    if (raw?.choices?.[0]?.finish_reason === 'length') {
+      return { ok: false, error: '规划 API 输出达到上限，回复未完成' };
+    }
     const completionMessage = raw?.choices?.[0]?.message;
     if (completionMessage) {
       if (expectedToolName) raw = { tool_calls: completionMessage.tool_calls ?? [], content: completionMessage.content };
@@ -926,10 +929,33 @@
     if (error?.code === 'INVALID_RESPONSE') return { code: 'INVALID_RESPONSE', message: '接口返回了无法解析的响应格式。' };
     if (error?.code === 'API_RESPONSE_ERROR') {
       const hostStatus = Number(error?.hostStatus);
-      return { code: 'API_RESPONSE_ERROR', message: Number.isInteger(hostStatus) && hostStatus >= 400 && hostStatus <= 599
-        ? `酒馆宿主 HTTP ${hostStatus}：上游状态未知；请检查酒馆服务器日志。`
-        : '接口返回错误，但上游状态未知；请检查酒馆服务器日志。' };
+      const hostLabel = Number.isInteger(hostStatus) && hostStatus >= 400 && hostStatus <= 599
+        ? `酒馆宿主 HTTP ${hostStatus}` : '酒馆宿主请求失败';
+      if (error?.providerCode === 'PERMISSION_DENIED') {
+        return { code: 'PERMISSION_DENIED', message: `${hostLabel}：权限不足；请检查服务商账号、密钥和模型访问权限。` };
+      }
+      if (error?.providerCode === 'backend_disconnected') {
+        return { code: 'BACKEND_DISCONNECTED', message: `${hostLabel}：后端连接已断开；请检查接口服务状态。` };
+      }
+      if ([401, 403, 404].includes(hostStatus)) {
+        return { code: `HOST_${hostStatus}`, message: `${hostLabel}：酒馆请求被拒绝；上游 HTTP 状态未提供。请检查酒馆服务器日志。` };
+      }
+      const category = error?.upstreamCategory;
+      if (['authentication', 'auth'].includes(category)) {
+        return { code: 'HOST_AUTH', message: `${hostLabel}：认证或权限请求失败；请检查账号与密钥。上游 HTTP 状态未提供。` };
+      }
+      if (['request', 'validation'].includes(category)) {
+        return { code: 'HOST_REQUEST', message: `${hostLabel}：请求参数被拒绝；请检查模型与接口配置。上游 HTTP 状态未提供。` };
+      }
+      if ([502, 503, 504].includes(hostStatus)) {
+        return { code: `HOST_${hostStatus}`, message: `${hostLabel}：网关或上游连接失败；上游状态未提供。请检查酒馆服务器日志。` };
+      }
+      if (['network', 'transport'].includes(category)) {
+        return { code: 'HOST_NETWORK', message: `${hostLabel}：连接上游服务失败；上游 HTTP 状态未提供。` };
+      }
+      return { code: 'API_RESPONSE_ERROR', message: `${hostLabel}：请求失败，上游状态未提供；请检查酒馆服务器日志。` };
     }
+    if (/^规划 API 输出达到上限，回复未完成/.test(message)) return { code: 'OUTPUT_INCOMPLETE', message: '规划输出达到上限，回复未完成；请调大最大输出长度。' };
     if (/^规划 API 未返回 game_content 工具调用/.test(message)) return { code: 'TOOL_CALL_MISSING', message: '接口返回了普通文本或其他工具，没有返回 game_content 调用。请用“测试工具调用”区分独立请求链路与完整规划提示词。' };
     if (/^game_content 工具参数不是有效 JSON/.test(message)) return { code: 'TOOL_ARGS_INVALID', message: 'game_content 工具参数不是有效 JSON。' };
     if (/^game_content 工具缺少非空 content 参数|^game_content 工具内容经过输出清理后为空/.test(message)) return { code: 'TOOL_CONTENT_EMPTY', message: 'game_content 工具返回了空内容。' };
@@ -2878,7 +2904,8 @@
     function retryable(error) {
       const code = classifyFailure(error).code;
       return ['TIMEOUT', 'NETWORK', 'INVALID_RESPONSE', 'EMPTY_RESPONSE', 'OUTLINE_MISSING', 'OUTLINE_EMPTY',
-        'TOOL_CALL_MISSING', 'TOOL_ARGS_INVALID', 'TOOL_CONTENT_EMPTY', 'HTTP_408', 'HTTP_429'].includes(code)
+        'TOOL_CALL_MISSING', 'TOOL_ARGS_INVALID', 'TOOL_CONTENT_EMPTY', 'HTTP_408', 'HTTP_429',
+        'HOST_502', 'HOST_503', 'HOST_504', 'HOST_NETWORK', 'BACKEND_DISCONNECTED'].includes(code)
         || /^HTTP_5\d\d$/.test(code);
     }
     function taskInfo(job, status, error = null) {
