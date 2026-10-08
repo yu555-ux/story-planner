@@ -300,7 +300,7 @@ test('planner history drops incomplete and orphan tool protocols without sending
   assert.deepEqual(history.map(item => item.messageId), [0, 1]);
 });
 
-test('tool continuations reuse the same outline and bind it only to the final assistant floor', async () => {
+test('tool continuations reuse the same outline, bind it to the final assistant floor, and do not pre-plan after reply', async () => {
   let messages = planner.buildSnapshot(toolTranscript({ final: false }).slice(0, 2)).messages;
   let state = {};
   let calls = 0;
@@ -327,10 +327,9 @@ test('tool continuations reuse the same outline and bind it only to the final as
   assert.equal(lifecycle.markUsing(initial.id), true);
   messages = planner.buildSnapshot(toolTranscript()).messages;
   lifecycle.onMessage();
-  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
   assert.equal(state.outlineHistory[0].status, 'used');
   assert.equal(state.outlineHistory[0].usedMessageId, 7);
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   lifecycle.destroy();
 });
 

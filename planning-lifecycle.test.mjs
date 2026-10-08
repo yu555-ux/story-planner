@@ -73,7 +73,7 @@ test('swipe generation uses the preceding source rather than the next-round read
   f.life.onMessage();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal((await f.life.ensureCurrent('swipe')).id, initial.id);
-  assert.equal(calls, 2);
+  assert.equal(calls, 1, 'a swipe reuses its original turn outline without planning after the reply');
   f.life.destroy();
 });
 
@@ -101,7 +101,7 @@ test('history reopens with stable chat identity and drops an unverifiable legacy
   life.destroy();
 });
 
-test('player arrival waits for the same background task and binds the actual assistant floor', async () => {
+test('assistant completion records use without starting a new API request', async () => {
   let release;
   let calls = 0;
   const f = fixture(async () => {
@@ -113,12 +113,12 @@ test('player arrival waits for the same background task and binds the actual ass
   f.messages.push({ messageId: 2, role: 'assistant', content: '第一轮' });
   f.life.onMessage();
   await Promise.resolve();
+  assert.equal(calls, 1, 'assistant completion only updates fine-outline usage state');
+  assert.deepEqual(f.state().outlineHistory.map(item => item.status), ['used']);
   f.messages.push({ messageId: 3, role: 'user', content: '第二次输入' });
-  let finished = false;
-  const waiting = f.life.ensureCurrent().then(value => { finished = true; return value; });
+  const waiting = f.life.ensureCurrent();
   await Promise.resolve();
-  assert.equal(finished, false);
-  assert.equal(calls, 2);
+  assert.equal(calls, 2, 'the next API request starts only when the next user turn is gated');
   release(result('下一轮'));
   const next = await waiting;
   f.life.markUsing(next.id);
@@ -131,7 +131,37 @@ test('player arrival waits for the same background task and binds the actual ass
   f.life.destroy();
 });
 
-test('failed next planning is rescued before sending and never selects a consumed outline', async () => {
+test('a queued fine outline batch is bound to its active event revision', async () => {
+  let event = { id: 'event-a', revision: 1 };
+  let calls = 0;
+  const f = fixture(async job => {
+    calls += 1;
+    job.eventId = event.id;
+    job.eventRevision = event.revision;
+    return calls === 1
+      ? { rawText: '<outline>甲一</outline><outline>甲二</outline>' }
+      : { rawText: '<outline>乙一</outline>' };
+  }, { retryCount: 0 }, {
+    getSignature: () => event.id,
+    getBatchScope: () => ({ eventId: event.id, eventRevision: event.revision }),
+  });
+  const first = await f.life.ensureCurrent();
+  assert.equal(first.eventId, 'event-a');
+  assert.equal(f.state().fineBatchQueue[0].eventRevision, 1);
+  f.life.markUsing(first.id);
+  f.messages.push({ messageId: 2, role: 'assistant', content: '第一轮' });
+  f.life.onMessage();
+  event = { id: 'event-b', revision: 4 };
+  f.messages.push({ messageId: 3, role: 'user', content: '下一步' });
+  const next = await f.life.ensureCurrent();
+  assert.equal(calls, 2, 'the stale item from event A must be discarded before planning event B');
+  assert.equal(next.body, '乙一');
+  assert.equal(next.eventId, 'event-b');
+  assert.equal(next.eventRevision, 4);
+  f.life.destroy();
+});
+
+test('failed pre-generation planning is retried only when the same player turn is gated again', async () => {
   let calls = 0;
   const f = fixture(async () => {
     calls += 1;
@@ -144,8 +174,10 @@ test('failed next planning is rescued before sending and never selects a consume
   f.messages.push({ messageId: 2, role: 'assistant', content: '第一轮' });
   f.life.onMessage();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.notices.length, 1);
+  assert.equal(calls, 1);
+  assert.equal(f.notices.length, 0, 'assistant completion does not run or report a planner API task');
   f.messages.push({ messageId: 3, role: 'user', content: '继续' });
+  await assert.rejects(f.life.ensureCurrent(), /规划 API 返回了空内容/);
   const next = await f.life.ensureCurrent();
   assert.equal(next.body, '补救');
   assert.equal(calls, 3);
@@ -365,14 +397,15 @@ test('repeated regenerate requests reuse the same current outline after temporar
   assert.equal(f.life.markUsing(initial.id), true);
   f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
   f.life.onMessage();
-  await waitForCalls(2);
+  assert.equal(calls, 1, 'no outline is planned when the assistant reply finishes');
   f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
   const current = await f.life.ensureCurrent();
+  await waitForCalls(2);
   const currentId = current.id;
   assert.equal(f.life.markUsing(currentId), true);
   f.messages.push({ messageId: 4, role: 'assistant', content: '4楼回复0' });
   f.life.onMessage();
-  await waitForCalls(3);
+  assert.equal(calls, 2);
 
   for (let roll = 1; roll <= 3; roll += 1) {
     f.messages.pop();
@@ -382,13 +415,13 @@ test('repeated regenerate requests reuse the same current outline after temporar
     assert.equal(f.life.markUsing(reused.id, 'regenerate'), true);
     f.messages.push({ messageId: 4, role: 'assistant', content: `4楼重roll${roll}` });
     f.life.onMessage();
-    await waitForCalls(3 + roll);
+    assert.equal(calls, 2, 'assistant swipes do not trigger planning API calls');
   }
   assert.equal(f.state().outlineHistory.find(item => item.id === currentId).status, 'used');
   f.life.destroy();
 });
 
-test('swiping the current assistant preserves the current outline while replacing only its next outline', async () => {
+test('swiping the current assistant reuses its outline without creating a next-turn outline', async () => {
   let calls = 0;
   const f = fixture(async () => result(`细纲${++calls}`), { retryCount: 0 });
   const initial = await f.life.ensureCurrent();
@@ -396,6 +429,7 @@ test('swiping the current assistant preserves the current outline while replacin
   f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
   f.life.onMessage();
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1);
   f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
   const current = await f.life.ensureCurrent();
   f.life.markUsing(current.id);
@@ -407,7 +441,7 @@ test('swiping the current assistant preserves the current outline while replacin
   f.messages[4].content = '4楼回复B';
   f.life.onMessage(); // MESSAGE_SWIPED for the existing assistant floor.
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls, callsBeforeSwipe + 1);
+  assert.equal(calls, callsBeforeSwipe);
   assert.equal((await f.life.ensureCurrent('swipe')).id, current.id);
   f.life.destroy();
 });
@@ -438,42 +472,40 @@ async function preparedUsedRound() {
   assert.equal(f.life.markUsing(initial.id), true);
   f.messages.push({ messageId: 2, role: 'assistant', content: '2楼回复' });
   f.life.onMessage();
-  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
   f.messages.push({ messageId: 3, role: 'user', content: '3楼输入' });
   const current = await f.life.ensureCurrent();
   assert.equal(f.life.markUsing(current.id), true);
   f.messages.push({ messageId: 4, role: 'assistant', content: '4楼回复' });
   f.life.onMessage();
-  for (let attempt = 0; attempt < 30 && calls < 3; attempt += 1) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls, 3);
-  const next = f.state().outlineHistory.findLast(item => item.status === 'ready');
-  return { f, current, next, calls: () => calls };
+  assert.equal(calls, 2);
+  return { f, current, next: null, calls: () => calls };
 }
 
-test('deleting only the used assistant floor returns its outline to ready and removes its derived next outline', async () => {
+test('deleting only the used assistant floor returns its outline to ready without a derived next outline', async () => {
   const { f, current, next } = await preparedUsedRound();
   f.messages.pop();
   const changes = f.life.invalidate('MESSAGE_DELETED');
   assert.equal(f.state().outlineHistory.find(item => item.id === current.id).status, 'ready');
-  assert.equal(f.state().outlineHistory.some(item => item.id === next.id), false);
+  assert.equal(f.state().outlineHistory.length, 2, 'the initial and current-turn fine outlines remain in history');
   assert.deepEqual(changes.returnedToReadyIds, [current.id]);
-  assert.deepEqual(changes.prunedIds, [next.id]);
+  assert.deepEqual(changes.prunedIds, []);
   f.life.destroy();
 });
 
-test('deleting from the player floor through the end preserves a same-input candidate and replans different input', async () => {
+test('deleting the player source removes its outline and the same or changed input plans again', async () => {
   for (const input of ['3楼输入', '不同输入']) {
     const { f, current, next, calls } = await preparedUsedRound();
     f.messages.splice(3);
     const changes = f.life.invalidate('MESSAGE_DELETED');
     assert.equal(changes.returnedToReadyIds.includes(current.id), true);
-    assert.equal(f.state().outlineHistory.some(item => item.id === next.id), false);
+    assert.equal(changes.prunedIds.includes(current.id), false);
+    assert.equal(next, null);
     f.messages.push({ messageId: 3, role: 'user', content: input });
     const selected = await f.life.ensureCurrent();
     if (input === '3楼输入') assert.equal(selected.id, current.id);
     else {
       assert.notEqual(selected.id, current.id);
-      assert.equal(calls(), 4);
+      assert.equal(calls(), 3);
     }
     f.life.destroy();
   }
@@ -602,7 +634,7 @@ test('deleting the source while a plan request is in flight cancels its late res
   f.life.destroy();
 });
 
-test('stopping current foreground planning cancels it without stopping background next planning', async () => {
+test('stopping current pre-generation planning cancels it and reply completion starts no background task', async () => {
   let releaseCurrent;
   const foreground = fixture(() => new Promise(resolve => { releaseCurrent = resolve; }), { retryCount: 0 });
   const pendingCurrent = foreground.life.ensureCurrent();
@@ -616,26 +648,18 @@ test('stopping current foreground planning cancels it without stopping backgroun
   foreground.life.destroy();
 
   let calls = 0;
-  let releaseNext;
-  const background = fixture(() => {
-    calls += 1;
-    return calls === 1 ? Promise.resolve(result('本轮')) : new Promise(resolve => { releaseNext = resolve; });
-  }, { retryCount: 0 });
-  const initial = await background.life.ensureCurrent();
-  assert.equal(background.life.markUsing(initial.id), true);
-  background.messages.push({ messageId: 2, role: 'assistant', content: '本轮回复' });
-  background.life.onMessage();
-  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(background.life.getStatus().phase, 'next');
-  background.life.stopCurrent();
-  assert.equal(background.life.getStatus().running, true);
-  releaseNext(result('后台下一轮'));
-  for (let attempt = 0; attempt < 30 && background.state().outlineHistory.length < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(background.state().outlineHistory.some(record => record.body === '后台下一轮'), true);
-  background.life.destroy();
+  const completed = fixture(async () => { calls += 1; return result('本轮'); }, { retryCount: 0 });
+  const outline = await completed.life.ensureCurrent();
+  assert.equal(completed.life.markUsing(outline.id), true);
+  completed.messages.push({ messageId: 2, role: 'assistant', content: '本轮回复' });
+  completed.life.onMessage();
+  assert.equal(calls, 1);
+  assert.equal(completed.life.getStatus().running, false);
+  assert.equal(completed.state().outlineHistory.length, 1);
+  completed.life.destroy();
 });
 
-test('stopping planner-owned next task rejects its late result and rescues on the next send', async () => {
+test('stopping planner API before a user response rejects the late result and allows explicit retry', async () => {
   let calls = 0;
   let releaseNext;
   const phases = [];
@@ -647,15 +671,18 @@ test('stopping planner-owned next task rejects its late result and rescues on th
   f.life.markUsing(first.id);
   f.messages.push({ messageId: 2, role: 'assistant', content: '第一轮回复' });
   f.life.onMessage();
-  for (let attempt = 0; attempt < 30 && calls < 2; attempt += 1) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.life.getStatus().phase, 'next');
-  assert.equal(phases.at(-1).phase, 'next');
+  f.messages.push({ messageId: 3, role: 'user', content: '下一步' });
+  const pending = f.life.ensureCurrent();
+  for (let attempt = 0; attempt < 30 && !releaseNext; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.life.getStatus().phase, 'current');
+  assert.equal(phases.at(-1).phase, 'current');
   assert.equal(phases.at(-1).running, true);
   f.life.stopActivePlanning();
   assert.equal(phases.at(-1).running, false);
   assert.equal(f.state().lastTask.status, 'cancelled');
   assert.equal(engine.buildPanelViewModel({ enabled: true }, f.state(), f.life.getStatus()).status, 'idle');
   releaseNext(result('不应保存的迟到细纲'));
+  await assert.rejects(pending);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.state().outlineHistory.some(item => item.body === '不应保存的迟到细纲'), false);
   assert.equal(f.notices.length, 0);

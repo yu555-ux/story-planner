@@ -41,6 +41,38 @@ test('failure notices distinguish HTTP status, missing tool calls, missing outli
   assert.equal(engine.parsePlannerResult('<outline>普通文本</outline>', 'game_content').error, '规划 API 未返回 game_content 工具调用');
 });
 
+test('legacy preset selection migrates to independent upper-outline and fine-outline selections', () => {
+  const preset = engine.createDefaultPlannerPreset();
+  const restored = engine.normalizePlannerPresetState({ plannerPresets: [preset], activePlannerPresetId: preset.id });
+  assert.equal(restored.activeOutlinePresetId, preset.id);
+  assert.equal(restored.activeFinePresetId, preset.id);
+  const separatePreset = { ...preset, id: 'separate-fine-preset', name: '细纲专用' };
+  const separate = engine.normalizePlannerPresetState({ plannerPresets: [preset, separatePreset],
+    activePlannerPresetId: preset.id, activeOutlinePresetId: preset.id, activeFinePresetId: separatePreset.id });
+  assert.equal(separate.activeOutlinePresetId, preset.id);
+  assert.equal(separate.activeFinePresetId, separatePreset.id);
+  const changed = engine.normalizePlannerPresetState({ ...restored, activeOutlinePresetId: 'missing', activeFinePresetId: preset.id });
+  assert.equal(changed.activeOutlinePresetId, preset.id);
+  assert.equal(changed.activeFinePresetId, preset.id);
+});
+
+test('fine outline batch parser validates all complete outlines before returning the batch', () => {
+  const parsed = engine.extractOutlineBatch('<outline>第一阶段</outline>\n<outline name="第二项">第二阶段</outline>');
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.items.map(item => item.body), ['第一阶段', '第二阶段']);
+  assert.equal(engine.extractOutlineBatch('<outline>完整</outline><outline>   </outline>').ok, false);
+  assert.equal(engine.extractOutlineBatch('<outline>缺少闭合标签').ok, false);
+  assert.equal(engine.extractOutlineBatch('没有细纲标签').ok, false);
+});
+
+test('upper plan parser separates premise, volume outlines, and event outlines without requiring parent links', () => {
+  const parsed = engine.extractUpperPlan('<premise>主题与主线</premise><volume>卷一</volume><volume>卷二</volume><event>事件甲</event><event>事件乙</event>');
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.value, { premise: '主题与主线', volumes: ['卷一', '卷二'], events: ['事件甲', '事件乙'] });
+  assert.equal(engine.extractUpperPlan('<premise>主题</premise><volume>卷一</volume>').ok, false);
+  assert.equal(engine.extractUpperPlan('<premise>主题</premise><volume>卷一</volume><event></event>').ok, false);
+});
+
 test('native stop cancels background planning, restores send controls, and requires rescue', async () => {
   const listeners = new Map();
   const events = { MESSAGE_RECEIVED: 'received', CHAT_CHANGED: 'changed', GENERATION_STARTED: 'started',
@@ -89,13 +121,15 @@ test('native stop cancels background planning, restores send controls, and requi
   };
   const runtime = engine.createTavernRuntime(host, { enabled: true, apiurl: 'https://api.example/v1',
     key: 'secret', model: 'planner', retryCount: 0, timeoutSeconds: 20 });
-  emit(events.MESSAGE_RECEIVED);
+  runtime.saveUpperPlanDraft({ premise: '核心主题', volumes: ['第一卷'], events: ['当前事件纲'] }, 'manual');
+  const pending = runtime.gate.ensureCurrentOutline({ chatIdentity: runtime.gate.getChatIdentity() });
   for (let attempt = 0; attempt < 30 && calls < 1; attempt += 1) await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(buttons, [true]);
   emit(events.GENERATION_STOPPED);
   assert.deepEqual(buttons, [true, false]);
   assert.equal(chatState.__tw_story_planner_v1.lastTask.status, 'cancelled');
   releaseFirst({ choices: [{ message: { content: '<outline>迟到细纲</outline>' } }] });
+  await assert.rejects(pending);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(chatState.__tw_story_planner_v1.outlineHistory.some(item => item.body === '迟到细纲'), false);
   messages.push({ message_id: 3, role: 'user', message: '继续' });
@@ -124,6 +158,11 @@ test('native runtime waits for initial planning, persists the outline, and injec
     prompts: [{ identifier: 'planner', name: '规划', role: 'system', content: '为剧情生成细纲。', enabled: true }],
     promptOrder: [{ identifier: 'planner', enabled: true }],
   };
+  const upperPrompt = {
+    id: 'upper-preset', name: '上层三纲', raw: {},
+    prompts: [{ identifier: 'upper', name: '规划总卷事件纲', role: 'system', content: 'UPPER_OUTLINE_PROMPT', enabled: true }],
+    promptOrder: [{ identifier: 'upper', enabled: true }],
+  };
   const apiCalls = [];
   const notices = [];
   const buttonState = [];
@@ -135,7 +174,8 @@ test('native runtime waits for initial planning, persists the outline, and injec
     chatMetadata: {},
     extensionSettings: { [EXTENSION_ID]: {
       config: { enabled: true, apiurl: 'https://api.example/v1', key: 'secret', model: 'planner-model', timeoutSeconds: 20, retryCount: 0, maxTokens: 400, temperature: 0.2, debounceMs: 0 },
-      plannerPresets: [prompt], activePlannerPresetId: prompt.id,
+      plannerPresets: [upperPrompt, prompt], activePlannerPresetId: prompt.id,
+      activeOutlinePresetId: upperPrompt.id, activeFinePresetId: prompt.id,
     } },
     eventTypes: events,
     eventSource: {
@@ -157,8 +197,9 @@ test('native runtime waits for initial planning, persists the outline, and injec
       createRequestData(data) { return data; },
       async sendRequest(data, extractData, signal) {
         apiCalls.push({ data, extractData, signal });
-        const content = apiCalls.length === 1 ? '<outline>初始细纲</outline>'
-          : apiCalls.length === 2 ? '<outline>下一轮细纲</outline>' : '缺少标签的正文';
+        const content = apiCalls.length === 1
+          ? '<premise>核心主题</premise><volume>第一卷</volume><volume>第二卷</volume><event>初始活动事件</event><event>第二活动事件</event>'
+          : apiCalls.length === 2 ? '<outline>初始细纲</outline>\n<outline>下一轮细纲</outline>' : '缺少标签的正文';
         return { choices: [{ message: { content } }] };
       },
     },
@@ -175,15 +216,33 @@ test('native runtime waits for initial planning, persists the outline, and injec
   const logs = [];
   host.console = { info: (...args) => logs.push(args), warn() {}, error() {} };
   const runtime = engine.createTavernRuntime(host, context.extensionSettings[EXTENSION_ID].config);
-  const gate = createGenerationGate(runtime, context, { notify() {} });
+  const gate = createGenerationGate(runtime, context, { notify: value => notices.push(value) });
+  const upperPlan = await runtime.generateUpperPlan();
+  assert.equal(apiCalls.length, 1);
+  assert.equal(upperPlan.premise.content, '核心主题');
+  assert.deepEqual(upperPlan.volumes.map(item => item.content), ['第一卷', '第二卷']);
+  assert.deepEqual(upperPlan.events.map(item => item.content), ['初始活动事件', '第二活动事件']);
+  assert.match(JSON.stringify(apiCalls[0].data.messages), /UPPER_OUTLINE_PROMPT/);
+  const advancedVolume = runtime.advanceActiveVolume();
+  assert.equal(advancedVolume.activeVolumeId, upperPlan.volumes[1].id);
+  runtime.setActiveVolume(upperPlan.volumes[0].id);
+  const advancedEvent = runtime.advanceActiveEvent();
+  assert.equal(advancedEvent.activeEventId, upperPlan.events[1].id);
+  runtime.setActiveEvent(upperPlan.events[0].id);
   let abortImmediate = false;
   await gate.interceptor([], 8192, immediate => { abortImmediate = immediate; }, 'normal');
   assert.equal(abortImmediate, false);
-  assert.equal(apiCalls.length, 1);
+  assert.equal(apiCalls.length, 2);
+  assert.match(JSON.stringify(apiCalls[1].data.messages), /为剧情生成细纲/);
+  assert.match(JSON.stringify(apiCalls[1].data.messages), /初始活动事件/);
   assert.match(JSON.stringify(logs), /初始规划请求/);
-  assert.equal(apiCalls[0].data.reverse_proxy, 'https://api.example/v1');
-  assert.equal(apiCalls[0].data.use_sysprompt, false);
+  assert.equal(apiCalls[1].data.reverse_proxy, 'https://api.example/v1');
+  assert.equal(apiCalls[1].data.use_sysprompt, false);
   assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '<outline>初始细纲</outline>');
+  const activeEvent = context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.upperPlan.events[0];
+  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.outlineHistory[0].eventId, activeEvent.id);
+  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.outlineHistory[0].eventRevision, activeEvent.revision);
+  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.fineBatchQueue[0].eventId, activeEvent.id);
   const promptEvent = { chat: [{ role: 'user', content: '玩家的第一步' }], dryRun: false };
   context.eventSource.emit(events.CHAT_COMPLETION_PROMPT_READY, promptEvent);
   assert.deepEqual(promptEvent.chat.at(-1), { role: 'system', content: '<outline>初始细纲</outline>' });
@@ -192,37 +251,38 @@ test('native runtime waits for initial planning, persists the outline, and injec
   assert.ok((listeners.get(events.MESSAGE_RECEIVED) ?? []).length > 0);
   context.eventSource.emit(events.MESSAGE_RECEIVED, { index: 2 });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(apiCalls.length, 1, 'intermediary message must not start next planning before generation ends');
+  assert.equal(apiCalls.length, 2, 'intermediary message must not start next planning before generation ends');
   context.eventSource.emit(events.GENERATION_ENDED);
-  for (let attempt = 0; attempt < 40 && apiCalls.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
-  assert.equal(apiCalls.length, 2);
-  assert.ok(buttonState.includes('busy'), 'next planning must occupy the native send controls');
-  assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '<outline>下一轮细纲</outline>');
-  for (let attempt = 0; attempt < 40 && buttonState.at(-1) !== 'ready'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
-  assert.equal(buttonState.at(-1), 'ready', 'planning completion must release native send controls');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(apiCalls.length, 2, 'assistant completion records usage without a planner API request');
   context.chat.push({ mes: '玩家的第二步', is_user: true, is_system: false });
   await gate.interceptor([], 8192, immediate => { abortImmediate = immediate; }, 'normal');
   assert.equal(abortImmediate, false);
+  assert.equal(apiCalls.length, 2, 'the second outline was stored in the first fine batch');
   const nextPromptEvent = { chat: [{ role: 'user', content: '玩家的第二步' }], dryRun: false };
   context.eventSource.emit(events.CHAT_COMPLETION_PROMPT_READY, nextPromptEvent);
   assert.deepEqual(nextPromptEvent.chat.at(-1), { role: 'system', content: '<outline>下一轮细纲</outline>' });
   context.chat.push({ mes: '酒馆 AI 的第二轮回复', is_user: false, is_system: false });
   context.eventSource.emit(events.MESSAGE_RECEIVED, { index: 4 });
-  for (let attempt = 0; attempt < 40 && apiCalls.length < 3; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
-  for (let attempt = 0; attempt < 40 && context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.status !== 'failed'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(apiCalls.length, 2);
+  context.chat.push({ mes: '玩家第三步', is_user: true, is_system: false });
+  abortImmediate = false;
+  await gate.interceptor([], 8192, immediate => { abortImmediate = immediate; }, 'normal');
   assert.equal(apiCalls.length, 3);
+  assert.equal(abortImmediate, true);
   assert.match(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.lastError, /缺少.*<outline>/);
   assert.match(notices.at(-1), /缺少.*<outline>/);
   assert.equal(context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.activeOutline, '');
   const history = context.chatMetadata.extensions[EXTENSION_ID].__tw_story_planner_v1.outlineHistory;
   assert.deepEqual(history.map(record => record.usedMessageId), [2, 4]);
-  context.chat.push({ mes: '玩家第三步', is_user: true, is_system: false });
+  context.chat.pop();
   const gateNotices = [];
   gate.destroy();
   const rescueGate = createGenerationGate(runtime, context, { notify: value => gateNotices.push(value) });
   abortImmediate = false;
   await rescueGate.interceptor([], 8192, immediate => { abortImmediate = immediate; }, 'normal');
-  assert.equal(apiCalls.length, 4, 'failed next outline must trigger a fresh blocking rescue request');
+  assert.equal(apiCalls.length, 4, 'a failed current-turn request can be retried before the main model runs');
   assert.equal(abortImmediate, true);
   assert.match(gateNotices.at(-1), /本轮细纲失败/);
   const failedPrompt = { chat: [], dryRun: false };

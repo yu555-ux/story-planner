@@ -253,6 +253,37 @@ test('preset cards keep selection, editing, enable and management controls avail
   panel.destroy();
 });
 
+test('upper three-layer planning and fine planning can use different presets', () => {
+  const document = { createElement: tag => new Element(tag, document), body: null };
+  document.body = new Element('body', document);
+  const outlinePreset = { ...engine.createDefaultPlannerPreset(), id: 'upper-role', name: '上层预设' };
+  const finePreset = { ...engine.createDefaultPlannerPreset(), id: 'fine-role', name: '细纲预设' };
+  let state = engine.normalizePlannerPresetState({ plannerPresets: [outlinePreset, finePreset],
+    activeOutlinePresetId: outlinePreset.id, activeFinePresetId: finePreset.id });
+  const panel = engine.createPlannerPanel({
+    document,
+    getViewModel: () => ({ config: { enabled: false }, status: 'disabled', configErrors: {} }),
+    getPresetState: () => state,
+    savePresetState: draft => { state = engine.normalizePlannerPresetState(draft); return state; },
+    setInterval: () => 1, clearInterval() {},
+  });
+  panel.open();
+  const root = document.body.children[0];
+  assert.equal(root.querySelector('[data-tw-field="activeOutlinePreset"]').value, outlinePreset.id);
+  assert.equal(root.querySelector('[data-tw-field="activeFinePreset"]').value, finePreset.id);
+  const upperSelect = root.querySelector('[data-tw-field="activeOutlinePreset"]');
+  upperSelect.value = finePreset.id;
+  upperSelect.dispatch('change');
+  assert.equal(state.activeOutlinePresetId, finePreset.id);
+  assert.equal(state.activeFinePresetId, finePreset.id);
+  const fineSelect = root.querySelector('[data-tw-field="activeFinePreset"]');
+  fineSelect.value = outlinePreset.id;
+  fineSelect.dispatch('change');
+  assert.equal(state.activeOutlinePresetId, finePreset.id);
+  assert.equal(state.activeFinePresetId, outlinePreset.id);
+  panel.destroy();
+});
+
 test('result page can retry a failed metadata save without requesting another outline', async () => {
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);

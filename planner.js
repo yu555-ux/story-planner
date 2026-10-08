@@ -362,7 +362,13 @@
       return serialized.length === LEGACY_DEFAULT_FINGERPRINT.length && fnv1a(serialized) === LEGACY_DEFAULT_FINGERPRINT.hash
         ? createDefaultPlannerPreset() : preset;
     }) : [createDefaultPlannerPreset()];
-    return { plannerPresets, activePlannerPresetId: plannerPresets.some(item => item.id === raw?.activePlannerPresetId) ? raw.activePlannerPresetId : plannerPresets[0].id };
+    const validId = value => plannerPresets.some(item => item.id === value) ? value : null;
+    const legacyId = validId(raw?.activePlannerPresetId) ?? plannerPresets[0].id;
+    const activeOutlinePresetId = validId(raw?.activeOutlinePresetId) ?? legacyId;
+    const activeFinePresetId = validId(raw?.activeFinePresetId) ?? legacyId;
+    return { plannerPresets, activeOutlinePresetId, activeFinePresetId,
+      // Keep the legacy field as an alias for older settings readers.
+      activePlannerPresetId: activeFinePresetId };
   }
   function validatePlannerPreset(preset) {
     const errors = [];
@@ -909,6 +915,55 @@
     return { ok: true, fullTag: rawText.slice(opens[0].index, closes[0].index + closes[0][0].length), body };
   }
 
+  function extractOutlineBatch(rawText) {
+    if (typeof rawText !== 'string') return { ok: false, error: '规划结果不是文本' };
+    const tags = [...rawText.matchAll(/<outline(?:\s[^<>]*)?>|<\/outline\s*>/gi)];
+    if (!tags.length) return { ok: false, error: '规划结果须包含一对完整的 <outline> 标签' };
+    const items = [];
+    let open = null;
+    for (const tag of tags) {
+      if (/^<outline(?:\s|>)/i.test(tag[0])) {
+        if (open) return { ok: false, error: '规划结果中的 <outline> 标签嵌套或未闭合' };
+        open = tag;
+        continue;
+      }
+      if (!open) return { ok: false, error: '规划结果中的 </outline> 标签没有对应开始标签' };
+      const body = rawText.slice(open.index + open[0].length, tag.index).trim();
+      if (!body) return { ok: false, error: '<outline> 内容为空' };
+      items.push({ fullTag: rawText.slice(open.index, tag.index + tag[0].length), body });
+      open = null;
+    }
+    if (open) return { ok: false, error: '规划结果中的 <outline> 标签未闭合' };
+    return items.length ? { ok: true, items } : { ok: false, error: '规划结果须包含一对完整的 <outline> 标签' };
+  }
+
+  function extractUpperPlan(rawText) {
+    if (typeof rawText !== 'string') return { ok: false, error: '上层规划结果不是文本' };
+    const sections = { premise: [], volume: [], event: [] };
+    const tagPattern = /<(\/)?(premise|volume|event)(?:\s[^<>]*)?>/gi;
+    let open = null;
+    for (const match of rawText.matchAll(tagPattern)) {
+      const closing = Boolean(match[1]);
+      const name = match[2].toLowerCase();
+      if (!closing) {
+        if (open) return { ok: false, error: '上层规划标签不能嵌套' };
+        open = { name, contentStart: match.index + match[0].length };
+      } else {
+        if (!open || open.name !== name) return { ok: false, error: `上层规划的 </${name}> 标签没有对应开始标签` };
+        sections[name].push(rawText.slice(open.contentStart, match.index).trim());
+        open = null;
+      }
+    }
+    if (open) return { ok: false, error: `上层规划的 <${open.name}> 标签未闭合` };
+    const [premise] = sections.premise;
+    const volumes = sections.volume;
+    const events = sections.event;
+    if (sections.premise.length !== 1 || !premise) return { ok: false, error: '上层规划须包含且仅包含一个非空 <premise> 总纲' };
+    if (!volumes.length || volumes.some(value => !value)) return { ok: false, error: '上层规划须包含至少一个非空 <volume> 卷纲' };
+    if (!events.length || events.some(value => !value)) return { ok: false, error: '上层规划须包含至少一个非空 <event> 事件纲' };
+    return { ok: true, value: { premise, volumes, events } };
+  }
+
   function classifyPlannerFailure(error) {
     const status = Number(error?.status);
     if (Number.isInteger(status) && status >= 400 && status <= 599) {
@@ -1153,7 +1208,7 @@
     const activationHint = !config.enabled ? '规划器已关闭，不会调用规划 API。'
       : Object.keys(validateConfig(config)).length ? '规划器已开启，请在设置中填写 API 地址和模型。'
         : !presetReady ? '规划器已开启，请先导入或填写可用预设。'
-          : '规划器已开启；首次玩家消息发送后、酒馆首次回复前执行初始规划。';
+          : '先保存总纲、卷纲和事件纲，再由酒馆生成前调用细纲规划。';
     return {
       config,
       status,
@@ -1166,6 +1221,10 @@
       lastError: text(state.lastError, DEFAULT_LIMITS.maxTextLength),
       persistenceError: text(state.persistenceError ?? runtimeStatus.persistenceError, DEFAULT_LIMITS.maxTextLength),
       configErrors: validateConfig(config),
+      upperPlan: isRecord(state.upperPlan) ? structuredClone(state.upperPlan) : null,
+      upperPlanStatus: text(state.upperPlanError
+        ? `${state.upperPlanStatus ?? ''} ${state.upperPlanError}` : state.upperPlanStatus, DEFAULT_LIMITS.maxTextLength),
+      upperPlanRunning: state.upperPlanStatus === 'running',
     };
   }
 
@@ -1599,8 +1658,42 @@
     resultError.setAttribute('role', 'alert');
     const runButton = button('立即规划', 'run', 'twsp-button twsp-button--primary');
     resultHeading.append(resultHeadingText, runButton);
+    const upperPlanSection = element('section', 'twsp-result-card');
+    const upperPlanHeading = element('div', 'twsp-list-heading');
+    upperPlanHeading.append(element('h4', '', '总纲、卷纲与事件纲'));
+    const runUpperPlanButton = button('一次生成上层三纲', 'runUpperPlan', 'twsp-button twsp-button--primary');
+    upperPlanHeading.append(runUpperPlanButton);
+    const upperPlanStatus = mark(element('p', 'twsp-hint'), 'view', 'upperPlanStatus');
+    upperPlanStatus.setAttribute('role', 'status');
+    const activeVolumeLabel = element('label', 'twsp-field');
+    activeVolumeLabel.append(element('span', '', '当前活动卷纲'));
+    const activeVolumeSelect = mark(element('select', 'twsp-input'), 'field', 'activeVolume');
+    activeVolumeLabel.append(activeVolumeSelect);
+    const nextVolumeButton = button('下一卷', 'nextVolume');
+    const activeEventLabel = element('label', 'twsp-field');
+    activeEventLabel.append(element('span', '', '当前活动事件纲'));
+    const activeEventSelect = mark(element('select', 'twsp-input'), 'field', 'activeEvent');
+    activeEventLabel.append(activeEventSelect);
+    const nextEventButton = button('下一事件', 'nextEvent');
+    const premiseDraftField = element('label', 'twsp-field');
+    premiseDraftField.append(element('span', '', '总纲内容'));
+    const premiseDraft = mark(element('textarea', 'twsp-input'), 'field', 'upperPremiseDraft');
+    premiseDraft.rows = 2; premiseDraft.placeholder = '填写简洁的主题、主线或核心设定';
+    premiseDraftField.append(premiseDraft);
+    const volumeDraftField = element('label', 'twsp-field');
+    volumeDraftField.append(element('span', '', '卷纲内容（各卷之间空一行）'));
+    const volumeDraft = mark(element('textarea', 'twsp-input'), 'field', 'volumeOutlineDraft');
+    volumeDraft.rows = 3; volumeDraftField.append(volumeDraft);
+    const eventDraftField = element('label', 'twsp-field');
+    eventDraftField.append(element('span', '', '事件纲内容（各事件之间空一行）'));
+    const eventDraft = mark(element('textarea', 'twsp-input'), 'field', 'eventOutlineDraft');
+    eventDraft.rows = 4; eventDraftField.append(eventDraft);
+    const saveUpperPlanDraftButton = button('保存手写或编辑内容', 'saveUpperPlanDraft');
+    const upperPlanView = mark(element('div', 'twsp-history'), 'view', 'upperPlan');
+    upperPlanSection.append(upperPlanHeading, upperPlanStatus, activeVolumeLabel, nextVolumeButton, activeEventLabel, nextEventButton,
+      premiseDraftField, volumeDraftField, eventDraftField, saveUpperPlanDraftButton, upperPlanView);
     const retrySaveButton = button('重试保存细纲', 'retrySave');
-    resultPanel.append(resultHeading, taskStatus, statusLine, outlineBody, historyHeading, historyList, resultError, retrySaveButton);
+    resultPanel.append(resultHeading, upperPlanSection, taskStatus, statusLine, outlineBody, historyHeading, historyList, resultError, retrySaveButton);
     const settingsPanel = element('section', 'twsp-panel');
     settingsPanel.setAttribute('role', 'tabpanel');
     settingsPanel.id = 'twsp-settings-panel';
@@ -1702,6 +1795,16 @@
     const presetsHeadingText = element('div');
     presetsHeadingText.append(element('span', 'twsp-eyebrow', 'WRITING PRESETS'), element('h3', 'twsp-page-title', '预设'), element('p', 'twsp-page-description', '整理规划时使用的提示词'));
     presetsHeading.append(presetsHeadingText);
+    const outlinePresetRole = element('label', 'twsp-field');
+    outlinePresetRole.append(element('span', '', '上层三纲预设'));
+    const outlinePresetSelect = mark(element('select', 'twsp-input'), 'field', 'activeOutlinePreset');
+    outlinePresetRole.append(outlinePresetSelect);
+    const finePresetRole = element('label', 'twsp-field');
+    finePresetRole.append(element('span', '', '细纲预设'));
+    const finePresetSelect = mark(element('select', 'twsp-input'), 'field', 'activeFinePreset');
+    finePresetRole.append(finePresetSelect);
+    const presetRoleGrid = element('div', 'twsp-grid twsp-params-grid');
+    presetRoleGrid.append(outlinePresetRole, finePresetRole);
     const presetSelect = mark(element('select', 'twsp-input'), 'field', 'presetSelect');
     presetSelect.hidden = true;
     const presetName = field('预设名称', 'presetName');
@@ -1738,13 +1841,13 @@
     presetSelectLabel.hidden = true;
     const importLabel = element('label', 'twsp-preset-import');
     importLabel.append(element('span', '', '导入 Chat Completion 预设 JSON'), importInput);
-    presetsPanel.append(presetsHeading, presetCards, presetSelectLabel, importLabel, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
+    presetsPanel.append(presetsHeading, presetRoleGrid, presetCards, presetSelectLabel, importLabel, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
       element('p', 'twsp-hint twsp-preset-footnote', '独立预设；温度与最大 token 以设置页为准。'));
     shell.append(header, tabs, resultPanel, settingsPanel, presetsPanel);
     root.append(style, shell);
     doc.body.append(root);
     let activeTab = 'result';
-    let presetState = structuredClone(options.getPresetState?.() ?? normalizePlannerPresetState({}));
+    let presetState = normalizePlannerPresetState(options.getPresetState?.() ?? {});
     let presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activePlannerPresetId) ?? presetState.plannerPresets[0];
     const expandedPromptIds = new Set();
     const expandedAdvancedIds = new Set();
@@ -1755,6 +1858,8 @@
     let lastPreviewCheck = 0;
     let refreshTimer = null;
     let testing = false;
+    let upperPlanInFlight = false;
+    let upperPlanDraftRevision = null;
     function showTab(name) {
       activeTab = name;
       resultPanel.hidden = name !== 'result';
@@ -1775,16 +1880,33 @@
       if (previewStamp) { previewStamp = null; presetStatus.textContent = '发送预览已过期；请重新查看。'; }
     }
     function selectPresetById(id) {
-      if (id === presetDraft.id) return true;
+      if (id === presetDraft.id && id === presetState.activeFinePresetId) return true;
       if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再切换。'; return false; }
       const next = presetState.plannerPresets.find(item => item.id === id);
       if (!next) return false;
       presetState.activePlannerPresetId = id;
+      presetState.activeFinePresetId = id;
       try { presetState = options.savePresetState(presetState); }
       catch (error) { presetStatus.textContent = `切换失败：${error.message}`; return false; }
       presetDraft = presetState.plannerPresets.find(item => item.id === id) ?? next;
       expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
       invalidatePreview(); renderPresetEditor(); render(false); return true;
+    }
+    function assignPresetRole(kind, id) {
+      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再切换。'; return false; }
+      const field = kind === 'outline' ? 'activeOutlinePresetId' : 'activeFinePresetId';
+      if (!presetState.plannerPresets.some(item => item.id === id)) return false;
+      const next = structuredClone(presetState);
+      next[field] = id;
+      if (kind === 'fine') next.activePlannerPresetId = id;
+      try { presetState = options.savePresetState(next); }
+      catch (error) { presetStatus.textContent = `预设切换失败：${error.message}`; renderPresetEditor(); return false; }
+      if (kind === 'fine') {
+        presetDraft = presetState.plannerPresets.find(item => item.id === id) ?? presetDraft;
+        expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
+        invalidatePreview();
+      }
+      renderPresetEditor(); render(false); return true;
     }
     function deletePresetById(id) {
       const target = presetState.plannerPresets.find(item => item.id === id);
@@ -1805,6 +1927,8 @@
         const next = structuredClone(presetState);
         next.plannerPresets = next.plannerPresets.filter(item => item.id !== id);
         if (next.activePlannerPresetId === id) next.activePlannerPresetId = next.plannerPresets[0].id;
+        if (next.activeFinePresetId === id) next.activeFinePresetId = next.plannerPresets[0].id;
+        if (next.activeOutlinePresetId === id) next.activeOutlinePresetId = next.plannerPresets[0].id;
         try { presetState = options.savePresetState(next); }
         catch (error) { presetStatus.textContent = `删除失败：${error.message}`; return; }
         presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activePlannerPresetId);
@@ -1821,8 +1945,16 @@
     }
     function renderPresetEditor() {
       presetSelect.replaceChildren();
+      outlinePresetSelect.replaceChildren();
+      finePresetSelect.replaceChildren();
       presetCards.replaceChildren();
       presetCompatibility.replaceChildren();
+      for (const item of presetState.plannerPresets) {
+        const outlineOption = element('option', '', item.name); outlineOption.value = item.id; outlinePresetSelect.append(outlineOption);
+        const fineOption = element('option', '', item.name); fineOption.value = item.id; finePresetSelect.append(fineOption);
+      }
+      outlinePresetSelect.value = presetState.activeOutlinePresetId;
+      finePresetSelect.value = presetState.activeFinePresetId;
       const spreset = getSPresetSettings(presetDraft);
       if (spreset.present) {
         presetCompatibility.append(element('p', '', `SPreset · ${spreset.summary}`));
@@ -1844,7 +1976,9 @@
         info.append(element('span', 'twsp-card-caption', selected ? '当前预设' : '其他预设'));
         const name = button(item.name, `presetCardName-${item.id}`, 'twsp-preset-card-name');
         const enabledCount = countEnabledPrompts(item);
-        const status = element('small', 'twsp-preset-card-status', `${selected ? '当前使用' : '可切换'} · ${enabledCount} 条提示词已启用`);
+        const assignedRoles = [item.id === presetState.activeOutlinePresetId ? '上层三纲' : '',
+          item.id === presetState.activeFinePresetId ? '细纲' : ''].filter(Boolean).join('、');
+        const status = element('small', 'twsp-preset-card-status', `${selected ? '正在编辑' : '可切换'}${assignedRoles ? ` · 用于${assignedRoles}` : ''} · ${enabledCount} 条提示词已启用`);
         if (selected) selectedStatus = status;
         info.append(name, status);
         const controls = element('div', 'twsp-preset-card-controls');
@@ -2126,6 +2260,50 @@
       retrySaveButton.hidden = !view.persistenceError;
       retrySaveButton.disabled = !view.persistenceError;
       runButton.disabled = Object.keys(view.configErrors).length > 0 || ['running', 'retrying'].includes(view.status) || view.presetReady === false;
+      const plan = view.upperPlan;
+      const volumes = Array.isArray(plan?.volumes) ? plan.volumes : [];
+      const events = Array.isArray(plan?.events) ? plan.events : [];
+      const draftRevision = plan?.revision ?? null;
+      if (draftRevision !== upperPlanDraftRevision) {
+        premiseDraft.value = plan?.premise?.content ?? '';
+        volumeDraft.value = (plan?.volumes ?? []).map(item => item.content).join('\n\n');
+        eventDraft.value = events.map(item => item.content).join('\n\n');
+        upperPlanDraftRevision = draftRevision;
+      }
+      activeVolumeSelect.replaceChildren();
+      for (const volume of volumes) {
+        const option = element('option', '', `第 ${Number(volume.order ?? 0) + 1} 卷 · ${String(volume.content ?? '').slice(0, 42)}`);
+        option.value = volume.id; activeVolumeSelect.append(option);
+      }
+      activeVolumeSelect.disabled = !volumes.length;
+      activeVolumeSelect.value = plan?.activeVolumeId ?? volumes[0]?.id ?? '';
+      activeVolumeLabel.hidden = !volumes.length;
+      activeEventSelect.replaceChildren();
+      for (const event of events) {
+        const option = element('option', '', `事件 ${Number(event.order ?? 0) + 1} · ${String(event.content ?? '').slice(0, 42)}`);
+        option.value = event.id; activeEventSelect.append(option);
+      }
+      activeEventSelect.disabled = !events.length;
+      activeEventSelect.value = plan?.activeEventId ?? events[0]?.id ?? '';
+      activeEventLabel.hidden = !events.length;
+      const volumeIndex = volumes.findIndex(item => item.id === activeVolumeSelect.value);
+      const eventIndex = events.findIndex(item => item.id === activeEventSelect.value);
+      nextVolumeButton.disabled = volumeIndex < 0 || volumeIndex >= volumes.length - 1;
+      nextEventButton.disabled = eventIndex < 0 || eventIndex >= events.length - 1;
+      upperPlanStatus.textContent = view.upperPlanStatus || (plan ? `已保存 ${events.length} 个事件纲；每次细纲批次将依据当前活动事件纲生成。` : '尚未创建上层规划。可以一次调用生成，也可以在后续填写手写版本。');
+      upperPlanView.replaceChildren();
+      if (plan) {
+        const addPlanItems = (title, values) => {
+          const section = element('section', 'twsp-history-entry');
+          section.append(element('strong', '', title));
+          for (const item of values) section.append(element('p', 'twsp-hint', item.content));
+          upperPlanView.append(section);
+        };
+        addPlanItems('总纲', plan.premise ? [plan.premise] : []);
+        if (volumes[volumeIndex]) addPlanItems(`卷纲 ${volumeIndex + 1}/${volumes.length}`, [volumes[volumeIndex]]);
+        if (events[eventIndex]) addPlanItems(`事件纲 ${eventIndex + 1}/${events.length}`, [events[eventIndex]]);
+      }
+      runUpperPlanButton.disabled = upperPlanInFlight || Object.keys(view.configErrors).length > 0 || view.upperPresetReady === false || view.upperPlanRunning;
       keyStatus.textContent = view.config.key ? 'API 密钥已保存。' : '尚未填写密钥；无密钥接口可留空。';
       if (activeTab === 'presets' && previewStamp && previewContextHash && Date.now() - lastPreviewCheck > 5000) {
         lastPreviewCheck = Date.now(); const stamp = previewStamp;
@@ -2222,13 +2400,15 @@
       markPresetDirty();
     });
     presetSelect.addEventListener('change', () => { if (!selectPresetById(presetSelect.value)) presetSelect.value = presetDraft.id; });
+    outlinePresetSelect.addEventListener('change', () => assignPresetRole('outline', outlinePresetSelect.value));
+    finePresetSelect.addEventListener('change', () => assignPresetRole('fine', finePresetSelect.value));
     importPresetButton.addEventListener('click', () => importInput.click?.());
     newPresetButton.addEventListener('click', () => {
       if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存。'; return; }
       presetDraft = structuredClone(createDefaultPlannerPreset());
       presetDraft.id = `preset-${fnv1a(`${Date.now()}-${Math.random()}`)}`;
       presetDraft.name = '新剧情预设'; presetState.plannerPresets.push(presetDraft);
-      presetState.activePlannerPresetId = presetDraft.id; markPresetDirty(); renderPresetEditor();
+      presetState.activePlannerPresetId = presetDraft.id; presetState.activeFinePresetId = presetDraft.id; markPresetDirty(); renderPresetEditor();
     });
     addPromptButton.addEventListener('click', () => {
       const identifier = `custom-${fnv1a(`${Date.now()}-${Math.random()}`)}`;
@@ -2254,6 +2434,7 @@
             ...presetState,
             plannerPresets: [...presetState.plannerPresets, ...importedPresets],
             activePlannerPresetId: importedPresets[0].id,
+            activeFinePresetId: importedPresets[0].id,
           });
           presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activePlannerPresetId);
           expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
@@ -2268,7 +2449,7 @@
     });
     savePresetButton.addEventListener('click', () => {
       try {
-        presetState = options.savePresetState({ ...presetState, activePlannerPresetId: presetDraft.id });
+        presetState = options.savePresetState({ ...presetState, activePlannerPresetId: presetDraft.id, activeFinePresetId: presetDraft.id });
         presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activePlannerPresetId);
         presetDirty = false; previewStamp = null; presetPreview.textContent = '';
         presetStatus.textContent = '预设已保存，旧发送预览已过期。'; renderPresetEditor(); render(false);
@@ -2499,6 +2680,44 @@
       try { await options.retryPersist?.(); }
       finally { render(false); }
     });
+    runUpperPlanButton.addEventListener('click', async () => {
+      if (upperPlanInFlight || typeof options.generateUpperPlan !== 'function') return;
+      upperPlanInFlight = true;
+      upperPlanStatus.textContent = '正在调用上层三纲预设…';
+      render(false);
+      try {
+        await options.generateUpperPlan();
+        upperPlanStatus.textContent = '总纲、卷纲和事件纲已整批保存。';
+      } catch (error) {
+        upperPlanStatus.textContent = `上层规划失败：${classifyPlannerFailure(error).message}`;
+      } finally { upperPlanInFlight = false; render(false); }
+    });
+    saveUpperPlanDraftButton.addEventListener('click', () => {
+      try {
+        options.saveUpperPlanDraft?.({
+          premise: premiseDraft.value,
+          volumes: volumeDraft.value.split(/\r?\n\s*\r?\n/).map(value => value.trim()).filter(Boolean),
+          events: eventDraft.value.split(/\r?\n\s*\r?\n/).map(value => value.trim()).filter(Boolean),
+        }, 'manual');
+        upperPlanStatus.textContent = '手写或编辑的上层三纲已保存。';
+        render(false);
+      } catch (error) { upperPlanStatus.textContent = `保存失败：${error.message}`; }
+    });
+    activeEventSelect.addEventListener('change', () => {
+      try {
+        options.setActiveEvent?.(activeEventSelect.value);
+        upperPlanStatus.textContent = '活动事件纲已切换。';
+        render(false);
+      } catch (error) { upperPlanStatus.textContent = `切换失败：${error.message}`; }
+    });
+    activeVolumeSelect.addEventListener('change', () => {
+      try {
+        options.setActiveVolume?.(activeVolumeSelect.value);
+        render(false);
+      } catch (error) { upperPlanStatus.textContent = `切换失败：${error.message}`; }
+    });
+    nextEventButton.addEventListener('click', () => { options.advanceActiveEvent?.(); render(false); });
+    nextVolumeButton.addEventListener('click', () => { options.advanceActiveVolume?.(); render(false); });
     runButton.addEventListener('click', () => { options.runNow(); render(false); });
     showTab('result');
     return { root, open, close, destroy, render, invalidatePreview };
@@ -2521,6 +2740,8 @@
   function createPlanningLifecycle(options) {
     const { readMessages, readState, writeState, getConfig, getSignature, run,
       classifyFailure, extractOutline, hash, stop, notify, log, persistState, onTaskChange } = options;
+    const extractBatch = options.extractOutlineBatch ?? extractOutlineBatch;
+    const getBatchScope = options.getBatchScope ?? (() => null);
     let epoch = 0;
     let destroyed = false;
     let task = null;
@@ -2598,8 +2819,13 @@
             reason: ['invalid', 'superseded'].includes(record?.status) ? 'legacy_status' : 'unverified_legacy_record' })) });
         const active = history.at(-1) ?? null;
         value = { ...old, schemaVersion: 4, chatId, outlineHistory: history,
+          fineBatchQueue: Array.isArray(old.fineBatchQueue) ? old.fineBatchQueue : [],
           activeOutline: active?.fullTag ?? '', outlineSourceMessageId: active?.sourceMessageId ?? null,
           outlineRevision: active?.sequence ?? null, rawText: active?.fullTag ?? '' };
+        writeState(value);
+      }
+      if (!Array.isArray(value.fineBatchQueue)) {
+        value = { ...value, fineBatchQueue: [] };
         writeState(value);
       }
       if (!recoveryChecked) {
@@ -2692,6 +2918,32 @@
     }
     function select(expected) {
       return state().outlineHistory.findLast(record => valid(record, expected)) ?? null;
+    }
+    function allocateQueuedOutline(anchor) {
+      const old = state();
+      const queue = Array.isArray(old.fineBatchQueue) ? old.fineBatchQueue : [];
+      if (!queue.length) return null;
+      const scope = getBatchScope();
+      if (queue[0]?.signature !== anchor.signature
+        || (scope && (queue[0]?.eventId !== scope.eventId || queue[0]?.eventRevision !== scope.eventRevision))) {
+        update({ fineBatchQueue: [] });
+        return null;
+      }
+      const item = queue[0];
+      const history = old.outlineHistory.filter(record => !(record.key === anchor.key && record.status === 'ready'));
+      const record = { id: uid(), sequence: Math.max(0, ...history.map(value => value.sequence || 0)) + 1,
+        key: anchor.key, chatId: anchor.chatId, signature: anchor.signature, sourceHash: anchor.sourceHash,
+        sourceMessageId: anchor.sourceMessageId, purpose: anchor.purpose, generatedPhase: 'batch',
+        inputFingerprint: anchor.inputFingerprint, inputMessageId: anchor.inputMessageId,
+        eventId: item.eventId, eventRevision: item.eventRevision,
+        batchId: item.batchId, batchIndex: item.batchIndex, batchSize: item.batchSize,
+        fullTag: item.fullTag, body: item.body, status: 'ready', usedMessageId: null, createdAt: stamp() };
+      history.push(record);
+      update({ outlineHistory: history, fineBatchQueue: queue.slice(1), activeOutline: record.fullTag,
+        outlineSourceMessageId: record.sourceMessageId, outlineRevision: record.sequence,
+        status: 'ready', lastError: null, lastTask: null });
+      void persistCritical(epoch, anchor.chatId);
+      return record;
     }
     function reconcileMessages(previous, current, operation = 'MESSAGE_UPDATED') {
       const before = Array.isArray(previous) ? previous : [];
@@ -2822,14 +3074,18 @@
       }
       const expected = target();
       const active = expected ? retained.findLast(record => valid(record, expected)) ?? null : null;
+      const currentSignature = getSignature();
+      const fineBatchQueue = (old.fineBatchQueue ?? []).filter(item => item?.signature === currentSignature);
       const patch = {
         outlineHistory: retained,
+        fineBatchQueue,
         activeOutline: active?.fullTag ?? '',
         outlineSourceMessageId: active?.sourceMessageId ?? null,
         outlineRevision: active?.sequence ?? null,
         rawText: active?.fullTag ?? '',
       };
       const changed = JSON.stringify(old.outlineHistory) !== JSON.stringify(retained)
+        || JSON.stringify(old.fineBatchQueue ?? []) !== JSON.stringify(fineBatchQueue)
         || old.activeOutline !== patch.activeOutline
         || old.outlineSourceMessageId !== patch.outlineSourceMessageId
         || old.outlineRevision !== patch.outlineRevision
@@ -2926,7 +3182,7 @@
       job.promise = (async () => {
         try {
           let result;
-          let outline;
+          let batch;
           for (let attempt = 1; attempt <= config.retryCount + 1; attempt += 1) {
             job.currentAttempt = { deadline: Date.now() + config.timeoutSeconds * 1000, timedOut: false };
             job.attempt = attempt; job.status = attempt === 1 ? 'running' : 'retrying';
@@ -2935,8 +3191,8 @@
             log.info?.('[剧情规划器][任务]', taskInfo(job, job.status));
             try {
               result = await cancellable(job, () => run(job, anchor));
-              outline = extractOutline(result.rawText);
-              if (!outline.ok) throw new Error(outline.error);
+              batch = extractBatch(result.rawText);
+              if (!batch.ok) throw new Error(batch.error);
               break;
             } catch (error) {
               if (!isTaskCurrent(job)) throw new Error('规划已取消：聊天或配置已变化');
@@ -2955,14 +3211,20 @@
             prunedCount: replaced.length, records: replaced.map(record => ({ id: record.id,
               sourceMessageId: record.sourceMessageId ?? null, usedMessageId: record.usedMessageId ?? null,
               reason: 'manual_replan_replaced' })) });
+          const batchId = uid();
           const record = { id: uid(), sequence: Math.max(0, ...history.map(item => item.sequence || 0)) + 1,
             key: anchor.key, chatId: anchor.chatId, signature: anchor.signature, sourceHash: anchor.sourceHash,
             sourceMessageId: anchor.sourceMessageId, purpose: anchor.purpose, generatedPhase: phase,
             inputFingerprint: anchor.inputFingerprint, inputMessageId: anchor.inputMessageId,
-            fullTag: outline.fullTag, body: outline.body, status: 'ready', usedMessageId: null, createdAt: stamp() };
+            eventId: job.eventId ?? null, eventRevision: job.eventRevision ?? null,
+            batchId, batchIndex: 0, batchSize: batch.items.length,
+            fullTag: batch.items[0].fullTag, body: batch.items[0].body, status: 'ready', usedMessageId: null, createdAt: stamp() };
           history.push(record);
+          const fineBatchQueue = batch.items.slice(1).map((item, index) => ({ ...item, batchId,
+            batchIndex: index + 1, batchSize: batch.items.length, signature: anchor.signature,
+            eventId: job.eventId ?? null, eventRevision: job.eventRevision ?? null }));
           job.status = 'ready';
-          update({ outlineHistory: history, activeOutline: record.fullTag, outlineSourceMessageId: record.sourceMessageId,
+          update({ outlineHistory: history, fineBatchQueue, activeOutline: record.fullTag, outlineSourceMessageId: record.sourceMessageId,
             outlineRevision: record.sequence, rawText: result.rawText, status: 'ready', lastError: null,
             initialStatus: anchor.purpose === 'initial' ? 'ready' : old.initialStatus,
             lastTask: taskInfo(job, 'ready') });
@@ -3021,6 +3283,8 @@
         reportTaskChange();
         return task.promise;
       }
+      const queued = allocateQueuedOutline(anchor);
+      if (queued) return queued;
       return start(anchor, 'current');
     }
     function markUsing(id, type = 'normal') {
@@ -3053,18 +3317,13 @@
         }
       }
       revalidate();
-      if (!getConfig().enabled || !finalNarrative || latest.messageId === 0) return;
-      const anchor = target();
-      if (!anchor || select(anchor)) return;
-      if (state().lastTask?.key === anchor.key || task?.anchor.key === anchor.key) return;
-      start(anchor, 'next').catch(() => {});
     }
     // Recover stale in-flight status as soon as a runtime is created, before UI
     // reads or the next generation asks for an outline.
     state();
     return { ensureCurrent, markUsing, onMessage, invalidate, identity, target, getCurrentTurn,
       getActive(type = 'normal') { revalidate(); return select(target(type)); },
-      manual() { const anchor = target(); if (!anchor) return false; start(anchor, 'current').catch(() => {}); return true; },
+      manual() { const anchor = target(); if (!anchor) return false; update({ fineBatchQueue: [] }); start(anchor, 'current').catch(() => {}); return true; },
       getStatus: taskStatus,
       flushPersistence: () => persistenceQueue,
       retryPersistence: () => persistCritical(epoch, state().chatId),
@@ -3134,6 +3393,12 @@
       return isRecord(variables?.[STATE_KEY]) ? variables[STATE_KEY] : null;
     }
 
+    function getActiveEvent() {
+      const plan = currentPlanningState()?.upperPlan;
+      if (!isRecord(plan) || !Array.isArray(plan.events)) return null;
+      return plan.events.find(item => item.id === plan.activeEventId) ?? null;
+    }
+
     function readSnapshot() {
       const lastMessageId = globals.getLastMessageId();
       if (!Number.isInteger(lastMessageId) || lastMessageId < 0) return buildSnapshot([], currentPlanningState());
@@ -3151,12 +3416,22 @@
         throw new Error(job.isTimedOut() ? '请求超时' : '规划已取消：聊天或配置已变化');
       }
       if (Object.keys(validateConfig(config)).length) throw new Error('API 设置不完整');
-      const preset = activePreset();
+      const preset = activePreset('fine');
       const generationType = job.reason === 'initial' ? 'initial' : 'normal';
       if (!hasEffectivePlannerPrompt(preset, generationType)) throw new Error('预设没有可发送的 Prompt，请先导入预设或新增并填写词块');
+      const activeEvent = getActiveEvent();
+      if (!activeEvent) throw new Error('请先生成上层三纲，并选择当前活动事件纲');
+      job.eventId = activeEvent.id;
+      job.eventRevision = activeEvent.revision;
       const context = job.context ??= await readPlannerContext(globals, snapshot, generationType);
+      context.activeEventId = activeEvent.id;
+      context.activeEventOutline = activeEvent.content;
       assertAttemptCurrent();
-      const final = job.prepared ??= prepareRequest(preset, context);
+      const final = structuredClone(prepareRequest(preset, context));
+      const eventBlock = { role: 'system', content: `当前活动事件纲：\n${activeEvent.content}`, source: 'active-event', sourceName: activeEvent.id };
+      final.blocks.unshift(eventBlock);
+      final.messages.unshift({ role: 'system', content: eventBlock.content });
+      final.request.ordered_prompts.unshift({ role: 'system', content: eventBlock.content });
       if (final.diagnostics.some(issue => issue.includes('宏 {{last_maintext}} 未找到'))) {
         throw new Error('最新助手回复缺少 <maintext>/<content> 正文');
       }
@@ -3184,8 +3459,8 @@
       assertAttemptCurrent();
       const parsed = parsePlannerResult(raw, final.request.tools?.[0]?.function.name, classifySPresetCompatibility(preset));
       if (!parsed.ok) throw new Error(parsed.error);
-      const outline = extractOutline(parsed.value.rawText);
-      if (!outline.ok) throw new Error(outline.error);
+      const outlineBatch = extractOutlineBatch(parsed.value.rawText);
+      if (!outlineBatch.ok) throw new Error(outlineBatch.error);
       assertAttemptCurrent();
       return parsed.value;
     }
@@ -3218,14 +3493,18 @@
       persistState: globals.platform === 'tauritavern' && typeof globals.persistVariables === 'function'
         ? () => globals.persistVariables({ type: 'chat' }) : undefined,
       getConfig: () => config,
-      getSignature: () => fnv1a(JSON.stringify({ config, preset: activePreset() })),
+      getSignature: () => fnv1a(JSON.stringify({ config, preset: activePreset('fine'), activeEvent: getActiveEvent() })),
+      getBatchScope: () => {
+        const activeEvent = getActiveEvent();
+        return activeEvent ? { eventId: activeEvent.id, eventRevision: activeEvent.revision } : null;
+      },
       run: (job, anchor) => {
         const messages = buildPlannerHistoryMessages(anchor.messages, job.config.historyLimit)
           .map(item => ({ message_id: item.messageId, role: item.role, message: item.content }));
         job.reason = anchor.purpose === 'initial' ? 'initial' : 'normal';
         return runJob(job, buildSnapshot(messages));
       },
-      classifyFailure: classifyPlannerFailure, extractOutline, hash: fnv1a,
+      classifyFailure: classifyPlannerFailure, extractOutline, extractOutlineBatch, hash: fnv1a,
       stop: id => { if (id) globals.stopGenerationById(id); },
       notify: message => globals.notifyError?.(message), log,
       onTaskChange: syncPlannerSendControls,
@@ -3320,9 +3599,10 @@
     }
 
     function getPanelViewModel() {
-      const presetReady = hasEffectivePlannerPrompt(activePreset());
+      const presetReady = hasEffectivePlannerPrompt(activePreset('fine'));
+      const upperPresetReady = hasEffectivePlannerPrompt(activePreset('outline'));
       return { ...buildPanelViewModel(config, currentPlanningState(), scheduler.getStatus(), presetReady),
-        presetReady, chatDisplay: globals.getCurrentChatDisplay?.(),
+        presetReady, upperPresetReady, chatDisplay: globals.getCurrentChatDisplay?.(),
         chatLabel: globals.getCurrentChatLabel?.() ?? '未选择角色卡或聊天存档' };
     }
 
@@ -3332,12 +3612,14 @@
     }
 
     let testGenerationId = null;
+    let upperPlanGenerationId = null;
     let configRevision = 0;
     function savePanelConfig(draft) {
       scheduler.changeChat();
       lastSentPrompt = null;
       lastPreparedRequest = null;
       if (testGenerationId) globals.stopGenerationById(testGenerationId);
+      if (upperPlanGenerationId) globals.stopGenerationById(upperPlanGenerationId);
       configRevision += 1;
       config = persistPlannerConfig(globals, draft, config);
       lifecycle.invalidate();
@@ -3468,17 +3750,20 @@
       }
     }
 
-    function activePreset() {
-      return presetState.plannerPresets.find(item => item.id === presetState.activePlannerPresetId) ?? presetState.plannerPresets[0];
+    function activePreset(kind = 'fine') {
+      const id = kind === 'outline' ? presetState.activeOutlinePresetId : presetState.activeFinePresetId;
+      return presetState.plannerPresets.find(item => item.id === id) ?? presetState.plannerPresets[0];
     }
     function savePresetState(draftState) {
-      for (const preset of draftState.plannerPresets) {
+      const normalized = normalizePlannerPresetState(draftState);
+      for (const preset of normalized.plannerPresets) {
         const errors = validatePlannerPreset(preset);
         if (errors.length) throw new Error(errors.join('；'));
       }
-      if (!draftState.plannerPresets.some(item => item.id === draftState.activePlannerPresetId)) throw new Error('活动预设不存在');
+      if (!normalized.plannerPresets.some(item => item.id === normalized.activeOutlinePresetId)) throw new Error('上层三纲预设不存在');
+      if (!normalized.plannerPresets.some(item => item.id === normalized.activeFinePresetId)) throw new Error('细纲预设不存在');
       scheduler.changeChat(); lastSentPrompt = null; lastPreparedRequest = null; configRevision += 1;
-      const next = structuredClone({ plannerPresets: draftState.plannerPresets, activePlannerPresetId: draftState.activePlannerPresetId });
+      const next = structuredClone({ ...normalized, activePlannerPresetId: normalized.activeFinePresetId });
       globals.updateVariablesWith(variables => ({ ...variables, ...next }), { type: 'script' });
       presetState = next;
       lifecycle.invalidate();
@@ -3504,6 +3789,123 @@
       return [...new Set(issues)];
     }
 
+    function writeChatPlanningPatch(patch) {
+      globals.updateVariablesWith(variables => {
+        const current = isRecord(variables?.[STATE_KEY]) ? variables[STATE_KEY] : {};
+        return { ...variables, [STATE_KEY]: { ...current, ...patch } };
+      }, { type: 'chat' });
+    }
+    function persistChatPlanningState() {
+      if (globals.platform === 'tauritavern' && typeof globals.persistVariables === 'function') {
+        try { return Promise.resolve(globals.persistVariables({ type: 'chat' })).catch(() => ({ confirmed: false })); }
+        catch { return Promise.resolve({ confirmed: false }); }
+      }
+      return Promise.resolve({ confirmed: false });
+    }
+    function saveUpperPlanDraft(value, source = 'manual') {
+      const premise = typeof value?.premise === 'string' ? value.premise.trim() : String(value?.premise?.content ?? '').trim();
+      const collect = items => Array.isArray(items) ? items.map(item => String(item?.content ?? item ?? '').trim()).filter(Boolean) : [];
+      const volumes = collect(value?.volumes);
+      const events = collect(value?.events);
+      if (!premise) throw new Error('请填写非空总纲');
+      if (!volumes.length) throw new Error('请至少填写一个卷纲');
+      if (!events.length) throw new Error('请至少填写一个事件纲');
+      const previous = currentPlanningState()?.upperPlan;
+      const revision = Math.max(0, Number(previous?.revision) || 0) + 1;
+      const makeId = (kind, index) => `plan-${kind}-${fnv1a(`${revision}:${Date.now()}:${index}:${Math.random()}`)}`;
+      const plan = {
+        schemaVersion: 1, revision,
+        premise: { id: makeId('premise', 0), content: premise, revision, source },
+        volumes: volumes.map((content, order) => ({ id: makeId('volume', order), order, content, revision, source })),
+        events: events.map((content, order) => ({ id: makeId('event', order), order, content, revision, source })),
+        activeVolumeId: null, activeEventId: null, updatedAt: new Date().toISOString(),
+      };
+      plan.activeVolumeId = plan.volumes[0].id;
+      plan.activeEventId = plan.events[0].id;
+      writeChatPlanningPatch({ upperPlan: plan, upperPlanStatus: '上层三纲已保存。', upperPlanError: null });
+      lifecycle.invalidate('UPPER_PLAN_UPDATED');
+      void persistChatPlanningState();
+      return structuredClone(plan);
+    }
+    function setActiveEvent(eventId) {
+      const state = currentPlanningState();
+      const plan = state?.upperPlan;
+      if (!isRecord(plan) || !Array.isArray(plan.events) || !plan.events.some(item => item.id === eventId)) {
+        throw new Error('找不到要激活的事件纲');
+      }
+      if (plan.activeEventId === eventId) return structuredClone(plan);
+      const nextPlan = { ...plan, activeEventId: eventId };
+      writeChatPlanningPatch({ upperPlan: nextPlan });
+      lifecycle.invalidate('ACTIVE_EVENT_CHANGED');
+      void persistChatPlanningState();
+      return structuredClone(nextPlan);
+    }
+    function setActiveVolume(volumeId) {
+      const state = currentPlanningState();
+      const plan = state?.upperPlan;
+      if (!isRecord(plan) || !Array.isArray(plan.volumes) || !plan.volumes.some(item => item.id === volumeId)) {
+        throw new Error('找不到要激活的卷纲');
+      }
+      if (plan.activeVolumeId === volumeId) return structuredClone(plan);
+      const nextPlan = { ...plan, activeVolumeId: volumeId };
+      writeChatPlanningPatch({ upperPlan: nextPlan });
+      void persistChatPlanningState();
+      return structuredClone(nextPlan);
+    }
+    function advancePlanCursor(items, activeId, setter) {
+      const index = items.findIndex(item => item.id === activeId);
+      if (index < 0 || index >= items.length - 1) return items[index] ?? null;
+      return setter(items[index + 1].id);
+    }
+    function advanceActiveEvent() {
+      const plan = currentPlanningState()?.upperPlan;
+      return plan ? advancePlanCursor(plan.events ?? [], plan.activeEventId, setActiveEvent) : null;
+    }
+    function advanceActiveVolume() {
+      const plan = currentPlanningState()?.upperPlan;
+      return plan ? advancePlanCursor(plan.volumes ?? [], plan.activeVolumeId, setActiveVolume) : null;
+    }
+    async function generateUpperPlan() {
+      if (Object.keys(validateConfig(config)).length) throw new Error('API 设置不完整');
+      const preset = activePreset('outline');
+      if (!hasEffectivePlannerPrompt(preset, 'normal')) throw new Error('上层三纲预设没有可发送的 Prompt');
+      const identity = lifecycle.identity();
+      const revision = configRevision;
+      const generationId = `tw-planner-upper-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
+      upperPlanGenerationId = generationId;
+      writeChatPlanningPatch({ upperPlanStatus: 'running', upperPlanError: null });
+      try {
+        const context = await readPlannerContext(globals, readSnapshot(), 'normal');
+        if (identity !== lifecycle.identity() || revision !== configRevision) throw new Error('上层规划请求已取消：聊天或设置已变化');
+        const final = prepareRequest(preset, context);
+        if (!final.messages.length || final.diagnostics.some(issue => issue.includes('已阻止本次转换'))) {
+          throw new Error('上层三纲预设无法生成有效请求');
+        }
+        const toolName = final.request.tools?.[0]?.function.name ?? null;
+        log.info?.('[剧情规划器][API] 开始调用上层三纲请求');
+        lastSentPrompt = { blocks: final.blocks, messages: final.request.ordered_prompts,
+          diagnostics: final.diagnostics, request: structuredClone(final.request) };
+        const raw = await runWithTimeout(() => globals.generateRaw({
+          generation_id: generationId, should_stream: false, should_silence: true,
+          max_chat_history: 0, custom_api: buildCustomApi(config), ...final.request,
+        }), config.timeoutSeconds, () => globals.stopGenerationById(generationId)).finally(() => { lastPreparedRequest = null; });
+        if (identity !== lifecycle.identity() || revision !== configRevision) throw new Error('上层规划请求已取消：聊天或设置已变化');
+        const parsed = parsePlannerResult(raw, toolName, classifySPresetCompatibility(preset));
+        if (!parsed.ok) throw new Error(parsed.error);
+        const upper = extractUpperPlan(parsed.value.rawText);
+        if (!upper.ok) throw new Error(upper.error);
+        const plan = saveUpperPlanDraft(upper.value, 'api');
+        return plan;
+      } catch (error) {
+        if (identity === lifecycle.identity() && revision === configRevision) {
+          writeChatPlanningPatch({ upperPlanStatus: '上层三纲生成失败。', upperPlanError: classifyPlannerFailure(error).message });
+        }
+        throw error;
+      } finally {
+        if (upperPlanGenerationId === generationId) upperPlanGenerationId = null;
+      }
+    }
+
     function openPanel() {
       if (destroyed) return false;
       if (!panel) {
@@ -3518,6 +3920,8 @@
           getViewModel: getPanelViewModel,
           getPresetState: () => structuredClone(presetState),
           savePresetState, checkPreset, previewPreset, checkPreviewFresh,
+          generateUpperPlan, saveUpperPlanDraft, setActiveVolume, setActiveEvent,
+          advanceActiveVolume, advanceActiveEvent,
           saveConfig: savePanelConfig,
           setChatRecordName,
           persistConfig: () => typeof globals.persistVariables === 'function'
@@ -3543,6 +3947,7 @@
         lastPreparedRequest = null;
         scheduler.destroy();
         if (testGenerationId) globals.stopGenerationById(testGenerationId);
+        if (upperPlanGenerationId) globals.stopGenerationById(upperPlanGenerationId);
         panel?.destroy();
         panel = null;
         while (disposers.length) {
@@ -3560,6 +3965,8 @@
       getPresetState: () => structuredClone(presetState),
       getLastSentPrompt: () => lastSentPrompt ? structuredClone(lastSentPrompt) : null,
       savePresetState, checkPreset, previewPreset,
+      generateUpperPlan, saveUpperPlanDraft, setActiveVolume, setActiveEvent,
+      advanceActiveVolume, advanceActiveEvent,
       fetchModels,
       schedule(reason) {
         if (config.enabled) scheduler.schedule(reason);
@@ -3601,6 +4008,8 @@
     buildPlannerHistoryMessages,
     classifyPlanningTurn,
     extractOutline,
+    extractOutlineBatch,
+    extractUpperPlan,
     createPlannerPanel,
     createPlannerScheduler,
     createTavernRuntime,
