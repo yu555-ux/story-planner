@@ -1,7 +1,7 @@
 {
   "display_name": "剧情规划器",
   "author": "TavernWeave",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "js": "index.js",
   "css": "style.css",
   "loading_order": 110,

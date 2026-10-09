@@ -130,16 +130,14 @@
       let variableTurnStarted = false;
       try {
         planning = true;
-        if (runtime.gate.hasVariablePlannerState?.()) {
-          const need = runtime.gate.getVariablePlannerNeed?.();
-          if (need?.kind !== 'ready') {
-            const labels = { initial: '总纲与首批卷纲', volume: '卷纲批次', event: '当前卷纲阶段的事件纲批次',
-              fine: '当前事件纲阶段的细纲批次', rewrite: `待重写${need?.target ?? '提纲'}` };
-            const detail = need?.kind === 'rewrite'
-              ? `新版变量剧情有${labels.rewrite}尚未重写，请先在规划面板提交对应提纲`
-              : `新版变量剧情缺少${labels[need?.kind] ?? '有效提纲'}，请先补齐对应批次`;
-            throw new Error(detail);
+        const useVariablePlanner = runtime.gate.shouldUseVariablePlannerTurn?.(turn)
+          ?? runtime.gate.hasVariablePlannerState?.();
+        if (useVariablePlanner) {
+          if (typeof runtime.gate.ensureVariablePlannerReady !== 'function') {
+            throw new Error('新版变量剧情规划 API 尚未连接');
           }
+          await runtime.gate.ensureVariablePlannerReady({ chatIdentity, userMessageId, turnKind: turn.kind });
+          if (runtime.gate.getChatIdentity() !== chatIdentity) throw new Error('chat changed');
           variableTurnStarted = true;
           const variableSnapshot = await runtime.gate.beginVariablePlannerTurn?.(userMessageId, chatIdentity);
           if (runtime.gate.getChatIdentity() !== chatIdentity) throw new Error('chat changed');

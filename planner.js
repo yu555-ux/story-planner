@@ -1233,6 +1233,7 @@
         : { kind: 'initial', parentId: null, parentRevision: null, parentStageId: null },
       variablePlannerSnapshot: state.variablePlanner ? planningModel.getActivePlanSnapshot(state.variablePlanner) : null,
       variablePlannerError: text(state.variablePlannerError, DEFAULT_LIMITS.maxTextLength),
+      variablePlannerStatus: text(runtimeStatus.variablePlannerStatus, DEFAULT_LIMITS.maxTextLength),
     };
   }
 
@@ -1701,7 +1702,7 @@
     variablePlannerHeading.append(element('h4', '', '新版变量剧情框架'));
     const variablePlannerHelp = mark(element('p', 'twsp-hint'), 'view', 'variablePlannerStatus');
     const variablePlannerDraftField = element('label', 'twsp-field');
-    variablePlannerDraftField.append(element('span', '', '新版规划输出（按当前缺口粘贴标签块）'));
+    variablePlannerDraftField.append(element('span', '', '新版规划输出（手动补录或修订标签块）'));
     const variablePlannerDraft = mark(element('textarea', 'twsp-input'), 'field', 'variablePlannerDraft');
     variablePlannerDraft.rows = 9;
     variablePlannerDraft.placeholder = '<overall_outline>\n核心主题：\n主角起点：\n主线目标：\n故事基调：\n</overall_outline>\n<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>';
@@ -2350,14 +2351,15 @@
       }
       const variableNeed = view.variablePlannerNeed?.kind ?? 'initial';
       const variableInstructions = {
-        initial: '首次建立新版计划：粘贴一个 <overall_outline> 和至少一个 <volume_outline>。必需字段见示例；保存后再按缺口补事件纲与细纲。',
-        volume: '当前卷纲阶段已用完：粘贴一批 <volume_outline>。每卷需包含“关键事件”列表。',
-        event: '当前卷纲关键事件缺少事件纲：粘贴一批 <event_outline>。每个提纲需有事件名、事件定位、事件目标、核心剧情及至少一个阶段。',
-        fine: '当前事件阶段缺少细纲：粘贴一批 <fine_outline>。每个提纲需有至少一个阶段，并填写剧情目的、时间、地点、核心情节、结尾收束。',
-        rewrite: `有待重写的${view.variablePlannerNeed?.target ?? '提纲'}：粘贴一个对应层级的新标签块。完成重写后，受影响的下层缺口会重新显示。`,
+        initial: '开局首次正常发送前会自动调用规划 API：先生成总纲和首批卷纲，再按当前父阶段补事件纲与细纲。也可在此手动粘贴完整标签块。',
+        volume: '当前卷纲阶段已用完：下次正文生成前会调用上层预设补充卷纲。也可在此手动粘贴一批 <volume_outline>。',
+        event: '当前卷纲关键事件缺少事件纲：下次正文生成前会调用上层预设生成一批 <event_outline>。也可手动补录。',
+        fine: '当前事件阶段缺少细纲：下次正文生成前会调用细纲预设生成一批 <fine_outline>。也可手动补录。',
+        rewrite: `有待重写的${view.variablePlannerNeed?.target ?? '提纲'}：下次正文生成前会调用对应预设重写。也可在此手动粘贴一个对应层级的新标签块。`,
         ready: '当前卷纲、事件纲和细纲阶段都已就绪；阶段回报结算后再按新的缺口补充。',
       };
       variablePlannerHelp.textContent = variableInstructions[variableNeed] ?? '新版变量规划状态待检查。';
+      if (view.variablePlannerStatus) variablePlannerHelp.textContent = `${view.variablePlannerStatus} ${variablePlannerHelp.textContent}`;
       if (view.variablePlannerError) variablePlannerHelp.textContent += ` 保存失败：${view.variablePlannerError}`;
       const rewriteTemplates = { volume: '<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>',
         event: '<event_outline>\n事件名：\n事件定位：\n事件目标：\n核心剧情：\n阶段1：\n  阶段目标：\n  核心情节：\n  结尾收束：\n</event_outline>',
@@ -2371,7 +2373,7 @@
       variablePlannerDraft.placeholder = variableNeed === 'rewrite'
         ? rewriteTemplates[view.variablePlannerNeed?.targetKind] ?? '' : variableTemplates[variableNeed] ?? '';
       saveVariablePlannerDraftButton.disabled = variableNeed === 'ready' || Boolean(view.variablePlanner?.pendingTurn)
-        || view.status === 'running' || view.status === 'retrying';
+        || Boolean(view.variablePlannerRunning) || view.status === 'running' || view.status === 'retrying';
       const variableMode = Boolean(view.variablePlanner);
       for (const control of [runUpperPlanButton, activeVolumeLabel, nextVolumeButton, activeEventLabel, nextEventButton,
         premiseDraftField, volumeDraftField, eventDraftField, saveUpperPlanDraftButton]) control.hidden = variableMode;
@@ -3458,6 +3460,8 @@
     let lastSentPrompt = null;
     let lastPreparedRequest = null;
     let variablePlannerPersistQueue = Promise.resolve();
+    let activeVariablePlannerJob = null;
+    let variablePlannerStatus = '';
 
     function prepareRequest(preset, context) {
       const key = JSON.stringify({ preset, context });
@@ -3614,8 +3618,11 @@
       getChatIdentity: lifecycle.identity,
       getCurrentTurn: lifecycle.getCurrentTurn,
       hasVariablePlannerState: () => Boolean(getVariablePlannerState()),
+      shouldUseVariablePlannerTurn,
       getVariablePlannerNeed,
       getVariablePlannerSnapshot,
+      ensureVariablePlannerReady,
+      cancelVariablePlannerJob,
       beginVariablePlannerTurn,
       confirmVariablePlannerTurnInjected,
       clearVariablePlannerTurn,
@@ -3658,6 +3665,10 @@
       });
     });
     subscribe(globals.tavern_events.GENERATION_STOPPED, () => {
+      if (cancelVariablePlannerJob('规划已取消：用户停止了本轮生成')) {
+        mainGenerationActive = false; mainGenerationStopped = true;
+        return;
+      }
       if (plannerOwnsSendControls) {
         mainGenerationStopped = true;
         lifecycle.stopActivePlanning();
@@ -3692,6 +3703,7 @@
       });
     }
     subscribe(globals.tavern_events.CHAT_CHANGED, () => {
+      cancelVariablePlannerJob('规划已取消：聊天已切换');
       mainGenerationActive = false; mainGenerationStopped = false;
       lifecycle.invalidate('CHAT_CHANGED'); lastSentPrompt = null; lastPreparedRequest = null; panel?.invalidatePreview();
     });
@@ -3716,8 +3728,9 @@
     function getPanelViewModel() {
       const presetReady = hasEffectivePlannerPrompt(activePreset('fine'));
       const upperPresetReady = hasEffectivePlannerPrompt(activePreset('outline'));
-      return { ...buildPanelViewModel(config, currentPlanningState(), scheduler.getStatus(), presetReady),
-        presetReady, upperPresetReady, chatDisplay: globals.getCurrentChatDisplay?.(),
+      return { ...buildPanelViewModel(config, currentPlanningState(), { ...scheduler.getStatus(), variablePlannerStatus }, presetReady),
+        presetReady, upperPresetReady, variablePlannerRunning: Boolean(activeVariablePlannerJob),
+        chatDisplay: globals.getCurrentChatDisplay?.(),
         chatLabel: globals.getCurrentChatLabel?.() ?? '未选择角色卡或聊天存档' };
     }
 
@@ -3730,6 +3743,7 @@
     let upperPlanGenerationId = null;
     let configRevision = 0;
     function savePanelConfig(draft) {
+      cancelVariablePlannerJob('规划已取消：设置已更改');
       scheduler.changeChat();
       lastSentPrompt = null;
       lastPreparedRequest = null;
@@ -3877,6 +3891,7 @@
       }
       if (!normalized.plannerPresets.some(item => item.id === normalized.activeOutlinePresetId)) throw new Error('上层三纲预设不存在');
       if (!normalized.plannerPresets.some(item => item.id === normalized.activeFinePresetId)) throw new Error('细纲预设不存在');
+      cancelVariablePlannerJob('规划已取消：预设已更改');
       scheduler.changeChat(); lastSentPrompt = null; lastPreparedRequest = null; configRevision += 1;
       const next = structuredClone({ ...normalized, activePlannerPresetId: normalized.activeFinePresetId });
       globals.updateVariablesWith(variables => ({ ...variables, ...next }), { type: 'script' });
@@ -3956,6 +3971,7 @@
       return structuredClone(next);
     }
     function initializeVariablePlanner(rawText) {
+      if (activeVariablePlannerJob) throw new Error('自动规划正在运行，请等待当前规划请求结束');
       const parsed = planningModel.parsePlannerOutput(rawText, { kind: 'initial' });
       if (!parsed.ok) throw new Error(parsed.error);
       const current = getVariablePlannerState({ create: true });
@@ -3966,6 +3982,7 @@
       return saveVariablePlannerState(applied.state);
     }
     function appendVariablePlannerBatch({ kind, rawText, parentId, parentRevision, parentStageId } = {}) {
+      if (activeVariablePlannerJob) throw new Error('自动规划正在运行，请等待当前规划请求结束');
       const parsed = planningModel.parsePlannerOutput(rawText, { kind });
       if (!parsed.ok) throw new Error(parsed.error);
       const current = getVariablePlannerState();
@@ -3974,6 +3991,284 @@
       const appended = planningModel.appendOutlineBatch(current, { kind, parsed, parentId, parentRevision, parentStageId });
       if (!appended.ok) throw new Error(appended.error);
       return { state: saveVariablePlannerState(appended.state), nodes: structuredClone(appended.nodes) };
+    }
+    function variablePlannerMessagesFingerprint(messages) {
+      return fnv1a(JSON.stringify((messages ?? []).map(message => ({
+        messageId: message.messageId ?? null,
+        role: message.role ?? null,
+        content: message.content ?? '',
+        inputFingerprint: message.inputFingerprint ?? null,
+        messageFingerprint: message.messageFingerprint ?? null,
+        swipeId: message.swipeId ?? null,
+      }))));
+    }
+    function shouldUseVariablePlannerTurn(turn) {
+      if (getVariablePlannerState()) return true;
+      if (turn?.kind !== 'initial') return false;
+      const legacy = currentPlanningState() ?? {};
+      const hasLegacyOutlineHistory = Array.isArray(legacy.outlineHistory) && legacy.outlineHistory.length > 0;
+      const hasLegacyOutline = typeof legacy.activeOutline === 'string' && Boolean(legacy.activeOutline.trim());
+      const hasLegacyUpperPlan = isRecord(legacy.upperPlan)
+        && ['premise', 'volumes', 'events'].some(key => Array.isArray(legacy.upperPlan[key])
+          ? legacy.upperPlan[key].length > 0 : Boolean(legacy.upperPlan[key]));
+      return !hasLegacyOutlineHistory && !hasLegacyOutline && !hasLegacyUpperPlan;
+    }
+    function getVariablePlannerTaskContext(state, need) {
+      const sections = [];
+      const volume = state?.volumes?.find(item => item.id === need?.parentId && item.revision === need?.parentRevision)
+        ?? (need?.kind === 'fine' ? state?.volumes?.find(item => item.id === state.events?.find(event => event.id === need.parentId)?.parentId) : null);
+      const event = state?.events?.find(item => item.id === need?.parentId && item.revision === need?.parentRevision)
+        ?? (need?.kind === 'fine' ? state?.events?.find(item => item.id === need.parentId) : null);
+      const volumeStage = volume?.stages?.find(stage => stage.id === need?.parentStageId);
+      const eventStage = event?.stages?.find(stage => stage.id === need?.parentStageId);
+      if (state?.overall?.fullTag) sections.push(`当前总纲方向\n${state.overall.fullTag}`);
+      if (need?.kind === 'volume' && state?.volumes?.length) {
+        const previous = state.volumes.filter(item => item.status !== 'superseded').slice(-3);
+        if (previous.length) sections.push(`已有卷纲参考（避免重复并保持承接）\n${previous.map(item => item.fullTag).join('\n\n')}`);
+      }
+      if (volume?.fullTag) sections.push(`所属卷纲\n${volume.fullTag}`);
+      if (volumeStage) sections.push(`当前卷纲关键事件阶段\n${volumeStage.title}\n${volumeStage.content}`);
+      if (event?.fullTag) sections.push(`所属事件纲\n${event.fullTag}`);
+      if (eventStage) sections.push(`当前事件纲阶段\n${eventStage.title}\n${eventStage.content}`);
+      if (need?.kind === 'rewrite') {
+        const target = [state?.overall, ...(state?.volumes ?? []), ...(state?.events ?? []), ...(state?.fines ?? [])]
+          .find(item => item?.id === need.targetNodeId && item.revision === need.targetRevision);
+        if (target?.fullTag) sections.push(`需要重写的当前提纲\n${target.fullTag}`);
+        if (target?.stages?.length) {
+          const completed = target.stages.filter(stage => stage.completed);
+          if (completed.length) sections.push(`必须保留的已完成阶段\n${completed.map(stage => `${stage.title}\n${stage.content}`).join('\n\n')}`);
+        }
+        if (need.description) sections.push(`正文模型报告的问题及应保留目标\n${need.description}`);
+      }
+      return sections.join('\n\n');
+    }
+    function buildVariablePlannerTaskPrompt(kind, state, need) {
+      const instructions = {
+        initial: '任务：为当前新聊天建立开局规划。只输出一个 <overall_outline> 和至少一个 <volume_outline>，不要输出事件纲、细纲或其他说明。总纲必须包含“核心主题：”“主角起点：”“主线目标：”（其下分“浅层：”“深层：”）和“故事基调：”。每个卷纲必须包含“卷名：”“本卷定位：”“本卷目标：”“核心剧情：”“关键事件：”和“结尾收束：”；关键事件按顺序使用项目符号列出。',
+        volume: '任务：沿总纲方向补充下一批卷纲。只输出一个或多个 <volume_outline>，每个卷纲须包含“卷名：”“本卷定位：”“本卷目标：”“核心剧情：”“关键事件：”和“结尾收束：”；关键事件按推进顺序使用项目符号列出。不要输出其他层级或说明。',
+        event: '任务：只为给定的卷纲关键事件阶段补充事件纲。输出一个或多个 <event_outline>，每个必须包含“事件名：”“事件定位：”“事件目标：”“核心剧情：”，并至少包含一个“阶段1：”阶段；每个阶段填写“阶段目标：”“核心情节：”“结尾收束：”。本批所有事件纲都属于给定的同一个卷纲阶段。不要输出其他层级或说明。',
+        fine: '任务：只为给定的事件纲阶段补充细纲。输出一个或多个 <fine_outline>，每个至少包含一个“阶段1：”阶段；每个阶段填写“剧情目的：”“时间：”“地点：”“核心情节：”“结尾收束：”。本批所有细纲都属于给定的同一个事件纲阶段。不要输出其他层级或说明。',
+        rewrite: '任务：根据玩家行动、已发生的对话事实和问题说明，重写指定层级的提纲。只输出一个对应层级的标签块；保留已完成阶段及其事实，不得推翻已发生剧情。不要输出其他层级或说明。',
+      };
+      const context = getVariablePlannerTaskContext(state, need);
+      return [
+        '你正在为 SillyTavern 剧情规划器生成结构化计划数据。严格服从本任务指定的层级、数量和字段；标签必须成对，标签内容必须是可解析的纯文本。',
+        instructions[kind] ?? '',
+        kind === 'rewrite' ? `重写目标层级：${need?.targetKind ?? ''}；只输出 <${({ volume: 'volume_outline', event: 'event_outline', fine: 'fine_outline' })[need?.targetKind] ?? 'fine_outline'}> 标签块。` : '',
+        context,
+      ].filter(Boolean).join('\n\n');
+    }
+    function cancelVariablePlannerJob(reason = '规划已取消') {
+      const job = activeVariablePlannerJob;
+      if (!job || job.cancelled) return false;
+      job.cancelled = true;
+      setVariablePlannerStatus(reason);
+      job.cancelWait?.();
+      job.rejectPending?.(new Error(reason));
+      if (job.generationId) {
+        try { globals.stopGenerationById(job.generationId); } catch { /* cancellation still invalidates the result */ }
+      }
+      return true;
+    }
+    function setVariablePlannerStatus(status) {
+      variablePlannerStatus = status;
+      renderVariablePlannerPanel();
+    }
+    function renderVariablePlannerPanel() {
+      try { panel?.render(false); }
+      catch (error) { log.warn?.('[剧情规划器][新版变量状态显示]', error); }
+    }
+    function assertVariablePlannerJobCurrent(job) {
+      if (job.cancelled || activeVariablePlannerJob !== job) throw new Error('规划已取消：聊天或设置已变化');
+      if (job.chatIdentity !== lifecycle.identity() || job.configRevision !== configRevision) {
+        throw new Error('规划已取消：聊天或设置已变化');
+      }
+      if (variablePlannerMessagesFingerprint(readAllMessages()) !== job.messagesFingerprint) {
+        throw new Error('规划已取消：本轮聊天内容已变化');
+      }
+    }
+    function isVariablePlannerRetryable(error) {
+      const code = classifyPlannerFailure(error).code;
+      return ['TIMEOUT', 'NETWORK', 'INVALID_RESPONSE', 'EMPTY_RESPONSE', 'TOOL_CALL_MISSING',
+        'TOOL_ARGS_INVALID', 'TOOL_CONTENT_EMPTY', 'HTTP_408', 'HTTP_429', 'HOST_502', 'HOST_503',
+        'HOST_504', 'HOST_NETWORK', 'BACKEND_DISCONNECTED'].includes(code) || /^HTTP_5\d\d$/.test(code);
+    }
+    async function waitForVariablePlannerRetry(job, delay) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          job.cancelWait = null;
+          resolve();
+        }, delay);
+        job.cancelWait = () => {
+          clearTimeout(timer);
+          job.cancelWait = null;
+          reject(new Error('规划已取消：聊天或设置已变化'));
+        };
+      });
+      assertVariablePlannerJobCurrent(job);
+    }
+    async function requestVariablePlannerOutput(job, kind, need, state, generationType) {
+      assertVariablePlannerJobCurrent(job);
+      if (Object.keys(validateConfig(job.config)).length) throw new Error('API 设置不完整');
+      const presetKind = kind === 'fine' || (kind === 'rewrite' && need.targetKind === 'fine') ? 'fine' : 'outline';
+      const preset = activePreset(presetKind);
+      if (!hasEffectivePlannerPrompt(preset, generationType)) {
+        throw new Error(`${presetKind === 'fine' ? '细纲' : '上层规划'}预设没有可发送的 Prompt，请先导入或填写预设`);
+      }
+      const context = await readPlannerContext(globals, readSnapshot(), generationType);
+      assertVariablePlannerJobCurrent(job);
+      const final = structuredClone(prepareRequest(preset, context));
+      const taskBlock = { role: 'system', content: buildVariablePlannerTaskPrompt(kind, state, need),
+        source: 'variable-planner-task', sourceName: kind };
+      final.blocks.push(taskBlock);
+      final.messages.push({ role: taskBlock.role, content: taskBlock.content });
+      final.request.ordered_prompts.push({ role: taskBlock.role, content: taskBlock.content });
+      if (final.diagnostics.some(issue => issue.includes('宏 {{last_maintext}} 未找到'))) {
+        throw new Error('最新助手回复缺少 <maintext>/<content> 正文');
+      }
+      if (!final.messages.length || final.diagnostics.some(issue => issue.includes('已阻止本次转换'))) {
+        throw new Error('预设无法生成有效消息');
+      }
+      if (getTriggeredPlannerPrompts(preset, generationType).some(({ prompt }) => prompt.marker && ['worldInfoBefore', 'worldInfoAfter'].includes(prompt.identifier))) {
+        if (context.diagnostics.some(issue => issue.includes('缺少') && issue.includes('世界书'))) throw new Error('世界书接口缺失，请先检查预设页诊断');
+        if (context.diagnostics.some(issue => issue.includes('世界书读取失败') || issue.includes('世界书格式错误'))) throw new Error('世界书读取失败，请先检查预设页诊断');
+      }
+      if (getTriggeredPlannerPrompts(preset, generationType).some(({ prompt }) => prompt.marker && prompt.identifier === 'charDescription')
+        && context.diagnostics.some(issue => issue.includes('缺少 getCharacter'))) throw new Error('角色资料接口缺失，请先检查预设页诊断');
+      if (getTriggeredPlannerPrompts(preset, generationType).some(({ prompt }) => prompt.marker && prompt.identifier === 'personaDescription')
+        && !context.personaDescription) throw new Error('当前 Persona 无法读取');
+      const promptSummary = summarizePromptMessages(final.request.ordered_prompts);
+      log.info?.('[剧情规划器][诊断][提示词组装]', { stage: 'variable_planner_final_messages', kind,
+        generationType, ...promptSummary });
+      const toolName = final.request.tools?.[0]?.function.name ?? null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= job.config.retryCount + 1; attempt += 1) {
+        assertVariablePlannerJobCurrent(job);
+        const generationId = `tw-planner-variable-${job.id}-${attempt}`;
+        job.generationId = generationId;
+        const cancellation = new Promise((_, reject) => { job.rejectPending = reject; });
+        try {
+          job.attempt = attempt;
+          log.info?.('[剧情规划器][变量规划任务]', { kind, attempt, maxAttempts: job.config.retryCount + 1,
+            parentId: need.parentId ?? null, parentRevision: need.parentRevision ?? null,
+            parentStageId: need.parentStageId ?? null });
+          lastSentPrompt = { blocks: final.blocks, messages: final.request.ordered_prompts,
+            diagnostics: final.diagnostics, request: structuredClone(final.request) };
+          const raw = await runWithTimeout(() => Promise.race([globals.generateRaw({
+            generation_id: generationId, should_stream: false, should_silence: true,
+            max_chat_history: 0, custom_api: buildCustomApi(job.config), ...final.request,
+          }), cancellation]), job.config.timeoutSeconds, () => globals.stopGenerationById(generationId))
+            .finally(() => { if (job.rejectPending) job.rejectPending = null; lastPreparedRequest = null; });
+          assertVariablePlannerJobCurrent(job);
+          const result = parsePlannerResult(raw, toolName, classifySPresetCompatibility(preset));
+          if (!result.ok) throw new Error(result.error);
+          const parsed = planningModel.parsePlannerOutput(result.value.rawText, {
+            kind, rewriteTarget: kind === 'rewrite' ? need.targetKind : undefined,
+          });
+          if (!parsed.ok) {
+            const error = new Error(parsed.error);
+            error.code = 'INVALID_RESPONSE';
+            throw error;
+          }
+          assertVariablePlannerJobCurrent(job);
+          return parsed;
+        } catch (error) {
+          if (job.rejectPending) job.rejectPending = null;
+          if (job.cancelled || !isVariablePlannerRetryable(error) || attempt > job.config.retryCount) throw error;
+          lastError = error;
+          await waitForVariablePlannerRetry(job, Math.min(500 * attempt, 2000));
+        } finally {
+          if (job.generationId === generationId) job.generationId = null;
+        }
+      }
+      throw lastError ?? new Error('新版变量规划请求失败');
+    }
+    async function commitVariablePlannerOutput(job, need, expectedPlanRevision, parsed) {
+      assertVariablePlannerJobCurrent(job);
+      const current = getVariablePlannerState({ create: true });
+      if (current.planRevision !== expectedPlanRevision
+        || JSON.stringify(planningModel.getPlanningNeed(current)) !== JSON.stringify(need)) {
+        throw new Error('规划状态在 API 请求期间发生变化；旧结果已丢弃，请重试');
+      }
+      let next;
+      if (need.kind === 'initial') {
+        const applied = planningModel.applyInitialPlan(current, parsed);
+        if (!applied.ok) throw new Error(applied.error);
+        next = applied.state;
+      } else if (need.kind === 'rewrite') {
+        const rewritten = planningModel.appendRewriteResult(current, {
+          targetKind: need.targetKind, targetNodeId: need.targetNodeId, parsed,
+        });
+        if (!rewritten.ok) throw new Error(rewritten.error);
+        next = rewritten.state;
+      } else {
+        const appended = planningModel.appendOutlineBatch(current, {
+          kind: need.kind, parsed, parentId: need.parentId,
+          parentRevision: need.parentRevision, parentStageId: need.parentStageId,
+        });
+        if (!appended.ok) throw new Error(appended.error);
+        next = appended.state;
+      }
+      saveVariablePlannerState(next);
+      await variablePlannerPersistQueue;
+      assertVariablePlannerJobCurrent(job);
+      if (currentPlanningState()?.variablePlannerError) {
+        throw new Error('新版变量剧情状态未能保存；本次酒馆回复已阻止，请先重试保存');
+      }
+      return getVariablePlannerState();
+    }
+    async function ensureVariablePlannerReady({ chatIdentity, userMessageId, turnKind = 'normal' } = {}) {
+      if (activeVariablePlannerJob) throw new Error('新版变量规划正在处理中，请等待当前请求结束');
+      const messages = readAllMessages();
+      const input = [...messages].reverse().find(message => message.role === 'user');
+      if (!input || (userMessageId != null && String(input.messageId) !== String(userMessageId))) {
+        throw new Error('本轮玩家输入已变化，未启动新版规划请求');
+      }
+      const job = { id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+        chatIdentity, userMessageId: String(input.messageId), inputFingerprint: plannerInputFingerprint(input),
+        messagesFingerprint: variablePlannerMessagesFingerprint(messages), configRevision,
+        config: structuredClone(config), turnKind, cancelled: false, generationId: null,
+        rejectPending: null, cancelWait: null };
+      activeVariablePlannerJob = job;
+      renderVariablePlannerPanel();
+      syncPlannerSendControls({ running: true }, { hostGenerating: mainGenerationActive });
+      let becameReady = false;
+      try {
+        getVariablePlannerState({ create: true });
+        const generationType = turnKind === 'initial' ? 'initial' : 'normal';
+        for (let requestIndex = 0; requestIndex < 12; requestIndex += 1) {
+          assertVariablePlannerJobCurrent(job);
+          const state = getVariablePlannerState({ create: true });
+          const need = getVariablePlannerNeed();
+          if (need.kind === 'ready') {
+            becameReady = true;
+            return planningModel.getActivePlanSnapshot(state);
+          }
+          const labels = { initial: '总纲与首批卷纲', volume: '卷纲批次', event: '当前卷纲阶段的事件纲批次',
+            fine: '当前事件纲阶段的细纲批次', rewrite: `待重写${({ volume: '卷纲', event: '事件纲', fine: '细纲' })[need.targetKind] ?? '提纲'}` };
+          setVariablePlannerStatus(`正在调用规划 API：${labels[need.kind] ?? '补充提纲'}。`);
+          const expectedPlanRevision = state.planRevision;
+          try {
+            const parsed = await requestVariablePlannerOutput(job, need.kind, need, state, generationType);
+            await commitVariablePlannerOutput(job, need, expectedPlanRevision, parsed);
+          } catch (error) {
+            if (job.cancelled || /规划已取消|聊天已切换/.test(error?.message ?? '')) throw error;
+            const failure = classifyPlannerFailure(error);
+            const reason = failure.code === 'UNKNOWN' || failure.code === 'INVALID_RESPONSE'
+              ? error?.message ?? failure.message : failure.message;
+            throw new Error(`新版变量剧情${labels[need.kind] ?? '提纲'}规划失败：${reason}`);
+          }
+        }
+        throw new Error('新版变量剧情连续规划步骤过多，已停止本次正文生成；请检查各层规划状态');
+      } catch (error) {
+        if (!job.cancelled) setVariablePlannerStatus(`${error?.message ?? '新版变量剧情规划失败'}；本次回复已阻止，下次发送可重试。`);
+        throw error;
+      } finally {
+        if (activeVariablePlannerJob === job) activeVariablePlannerJob = null;
+        if (becameReady) setVariablePlannerStatus('');
+        else renderVariablePlannerPanel();
+        syncPlannerSendControls({ running: false }, { hostGenerating: mainGenerationActive });
+      }
     }
     function getVariablePlannerSnapshot() {
       const snapshot = planningModel.getActivePlanSnapshot(getVariablePlannerState());
@@ -4118,6 +4413,7 @@
         replyId: latest.messageId, replyFingerprint: plannerReplyFingerprint(latest), rawText: latest.content });
     }
     function appendVariablePlannerRewrite({ targetNodeId, rawText } = {}) {
+      if (activeVariablePlannerJob) throw new Error('自动规划正在运行，请等待当前规划请求结束');
       const current = getVariablePlannerState();
       if (!current) throw new Error('请先创建新版变量剧情计划');
       if (current.pendingTurn) throw new Error('本轮阶段快照正在使用，结束或停止生成后再重写提纲');
@@ -4282,6 +4578,7 @@
         destroyed = true;
         lastSentPrompt = null;
         lastPreparedRequest = null;
+        cancelVariablePlannerJob('规划已取消：扩展已关闭');
         scheduler.destroy();
         if (testGenerationId) globals.stopGenerationById(testGenerationId);
         if (upperPlanGenerationId) globals.stopGenerationById(upperPlanGenerationId);
