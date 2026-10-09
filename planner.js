@@ -1,9 +1,11 @@
 (function initStoryPlannerModule(root, factory) {
-  const api = factory();
+  const planningModel = root.TWStoryPlannerModelV1
+    ?? (typeof require === 'function' ? require('./planning-model.js') : null);
+  const api = factory(planningModel);
   const isCommonJs = typeof module === 'object' && module.exports;
   if (isCommonJs) module.exports = api;
   else root.TWStoryPlannerEngineV1 = api;
-})(typeof globalThis !== 'undefined' ? globalThis : window, function createStoryPlannerModule() {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function createStoryPlannerModule(planningModel) {
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
@@ -1225,6 +1227,12 @@
       upperPlanStatus: text(state.upperPlanError
         ? `${state.upperPlanStatus ?? ''} ${state.upperPlanError}` : state.upperPlanStatus, DEFAULT_LIMITS.maxTextLength),
       upperPlanRunning: state.upperPlanStatus === 'running',
+      variablePlanner: isRecord(state.variablePlanner) ? structuredClone(state.variablePlanner) : null,
+      variablePlannerNeed: state.variablePlanner ? state.variablePlanner.pendingRewrite
+        ? { kind: 'rewrite', ...structuredClone(state.variablePlanner.pendingRewrite) } : planningModel.getPlanningNeed(state.variablePlanner)
+        : { kind: 'initial', parentId: null, parentRevision: null, parentStageId: null },
+      variablePlannerSnapshot: state.variablePlanner ? planningModel.getActivePlanSnapshot(state.variablePlanner) : null,
+      variablePlannerError: text(state.variablePlannerError, DEFAULT_LIMITS.maxTextLength),
     };
   }
 
@@ -1689,10 +1697,21 @@
     const eventDraft = mark(element('textarea', 'twsp-input'), 'field', 'eventOutlineDraft');
     eventDraft.rows = 4; eventDraftField.append(eventDraft);
     const saveUpperPlanDraftButton = button('保存手写或编辑内容', 'saveUpperPlanDraft');
+    const variablePlannerHeading = element('div', 'twsp-list-heading');
+    variablePlannerHeading.append(element('h4', '', '新版变量剧情框架'));
+    const variablePlannerHelp = mark(element('p', 'twsp-hint'), 'view', 'variablePlannerStatus');
+    const variablePlannerDraftField = element('label', 'twsp-field');
+    variablePlannerDraftField.append(element('span', '', '新版规划输出（按当前缺口粘贴标签块）'));
+    const variablePlannerDraft = mark(element('textarea', 'twsp-input'), 'field', 'variablePlannerDraft');
+    variablePlannerDraft.rows = 9;
+    variablePlannerDraft.placeholder = '<overall_outline>\n核心主题：\n主角起点：\n主线目标：\n故事基调：\n</overall_outline>\n<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>';
+    variablePlannerDraftField.append(variablePlannerDraft);
+    const saveVariablePlannerDraftButton = button('保存新版计划或补充批次', 'saveVariablePlannerDraft', 'twsp-button twsp-button--primary');
     const upperPlanView = mark(element('div', 'twsp-history'), 'view', 'upperPlan');
     upperPlanSection.append(upperPlanHeading, upperPlanStatus, activeVolumeLabel, nextVolumeButton, activeEventLabel, nextEventButton,
-      premiseDraftField, volumeDraftField, eventDraftField, saveUpperPlanDraftButton, upperPlanView);
-    const retrySaveButton = button('重试保存细纲', 'retrySave');
+      premiseDraftField, volumeDraftField, eventDraftField, saveUpperPlanDraftButton,
+      variablePlannerHeading, variablePlannerHelp, variablePlannerDraftField, saveVariablePlannerDraftButton, upperPlanView);
+    const retrySaveButton = button('重试保存', 'retrySave');
     resultPanel.append(resultHeading, upperPlanSection, taskStatus, statusLine, outlineBody, historyHeading, historyList, resultError, retrySaveButton);
     const settingsPanel = element('section', 'twsp-panel');
     settingsPanel.setAttribute('role', 'tabpanel');
@@ -2256,10 +2275,12 @@
       const task = view.lastTask;
       taskStatus.textContent = task ? `${task.purpose === 'next' ? '下一轮' : '本轮'}任务 · 来源 #${task.sourceMessageId} · 尝试 ${task.attempt}/${task.maxAttempts}${task.lastError ? ` · ${task.lastError}` : ''}` : '';
       resultError.textContent = [view.persistenceError ? `保存提示：${view.persistenceError}` : '',
+        view.variablePlannerError ? `新版状态保存提示：${view.variablePlannerError}` : '',
         view.lastError ? `最近错误：${view.lastError}` : ''].filter(Boolean).join('；');
-      retrySaveButton.hidden = !view.persistenceError;
-      retrySaveButton.disabled = !view.persistenceError;
-      runButton.disabled = Object.keys(view.configErrors).length > 0 || ['running', 'retrying'].includes(view.status) || view.presetReady === false;
+      retrySaveButton.hidden = !view.persistenceError && !view.variablePlannerError;
+      retrySaveButton.disabled = !view.persistenceError && !view.variablePlannerError;
+      runButton.disabled = Boolean(view.variablePlanner) || Object.keys(view.configErrors).length > 0
+        || ['running', 'retrying'].includes(view.status) || view.presetReady === false;
       const plan = view.upperPlan;
       const volumes = Array.isArray(plan?.volumes) ? plan.volumes : [];
       const events = Array.isArray(plan?.events) ? plan.events : [];
@@ -2303,7 +2324,59 @@
         if (volumes[volumeIndex]) addPlanItems(`卷纲 ${volumeIndex + 1}/${volumes.length}`, [volumes[volumeIndex]]);
         if (events[eventIndex]) addPlanItems(`事件纲 ${eventIndex + 1}/${events.length}`, [events[eventIndex]]);
       }
-      runUpperPlanButton.disabled = upperPlanInFlight || Object.keys(view.configErrors).length > 0 || view.upperPresetReady === false || view.upperPlanRunning;
+      if (view.variablePlanner) {
+        const model = view.variablePlanner;
+        const snapshot = view.variablePlannerSnapshot;
+        const section = element('section', 'twsp-history-entry');
+        section.append(element('strong', '', `新版变量剧情框架 · 修订 ${model.planRevision ?? 0}`));
+        const needs = { initial: '需要创建总纲与首批卷纲', volume: '等待补充卷纲', event: '等待补充当前卷纲阶段的事件纲',
+          fine: '等待补充当前事件纲阶段的细纲', ready: '当前三层阶段均已就绪' };
+        section.append(element('p', 'twsp-hint', needs[view.variablePlannerNeed?.kind] ?? '规划状态待检查'));
+        if (snapshot) {
+          const addStage = (label, item) => {
+            if (!item) return;
+            section.append(element('p', 'twsp-hint', `${label} · ${item.stageTitle} · ${item.stageIndex + 1}`));
+            section.append(element('p', 'twsp-hint', item.stageContent));
+          };
+          if (snapshot.overall) section.append(element('p', 'twsp-hint', `总纲：${snapshot.overall.body}`));
+          addStage('当前卷纲', snapshot.volume);
+          addStage('当前事件纲', snapshot.event);
+          addStage('当前细纲', snapshot.fine);
+        }
+        if (model.pendingAdvance?.eventStageIds?.length) section.append(element('p', 'twsp-hint', '事件阶段已请求推进，等待所属细纲全部完成。'));
+        if (model.pendingAdvance?.volumeStageIds?.length) section.append(element('p', 'twsp-hint', '卷纲关键事件已请求推进，等待所属事件纲与细纲收尾。'));
+        if (model.pendingRewrite) section.append(element('p', 'twsp-hint', `待重写：${model.pendingRewrite.target} · ${model.pendingRewrite.description}`));
+        upperPlanView.append(section);
+      }
+      const variableNeed = view.variablePlannerNeed?.kind ?? 'initial';
+      const variableInstructions = {
+        initial: '首次建立新版计划：粘贴一个 <overall_outline> 和至少一个 <volume_outline>。必需字段见示例；保存后再按缺口补事件纲与细纲。',
+        volume: '当前卷纲阶段已用完：粘贴一批 <volume_outline>。每卷需包含“关键事件”列表。',
+        event: '当前卷纲关键事件缺少事件纲：粘贴一批 <event_outline>。每个提纲需有事件名、事件定位、事件目标、核心剧情及至少一个阶段。',
+        fine: '当前事件阶段缺少细纲：粘贴一批 <fine_outline>。每个提纲需有至少一个阶段，并填写剧情目的、时间、地点、核心情节、结尾收束。',
+        rewrite: `有待重写的${view.variablePlannerNeed?.target ?? '提纲'}：粘贴一个对应层级的新标签块。完成重写后，受影响的下层缺口会重新显示。`,
+        ready: '当前卷纲、事件纲和细纲阶段都已就绪；阶段回报结算后再按新的缺口补充。',
+      };
+      variablePlannerHelp.textContent = variableInstructions[variableNeed] ?? '新版变量规划状态待检查。';
+      if (view.variablePlannerError) variablePlannerHelp.textContent += ` 保存失败：${view.variablePlannerError}`;
+      const rewriteTemplates = { volume: '<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>',
+        event: '<event_outline>\n事件名：\n事件定位：\n事件目标：\n核心剧情：\n阶段1：\n  阶段目标：\n  核心情节：\n  结尾收束：\n</event_outline>',
+        fine: '<fine_outline>\n阶段1：\n  剧情目的：\n  时间：\n  地点：\n  核心情节：\n  结尾收束：\n</fine_outline>' };
+      const variableTemplates = {
+        initial: '<overall_outline>\n核心主题：\n主角起点：\n主线目标：\n故事基调：\n</overall_outline>\n<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>',
+        volume: '<volume_outline>\n卷名：\n本卷定位：\n本卷目标：\n核心剧情：\n关键事件：\n- 关键事件一\n结尾收束：\n</volume_outline>',
+        event: '<event_outline>\n事件名：\n事件定位：\n事件目标：\n核心剧情：\n阶段1：\n  阶段目标：\n  核心情节：\n  结尾收束：\n</event_outline>',
+        fine: '<fine_outline>\n阶段1：\n  剧情目的：\n  时间：\n  地点：\n  核心情节：\n  结尾收束：\n</fine_outline>',
+      };
+      variablePlannerDraft.placeholder = variableNeed === 'rewrite'
+        ? rewriteTemplates[view.variablePlannerNeed?.targetKind] ?? '' : variableTemplates[variableNeed] ?? '';
+      saveVariablePlannerDraftButton.disabled = variableNeed === 'ready' || Boolean(view.variablePlanner?.pendingTurn)
+        || view.status === 'running' || view.status === 'retrying';
+      const variableMode = Boolean(view.variablePlanner);
+      for (const control of [runUpperPlanButton, activeVolumeLabel, nextVolumeButton, activeEventLabel, nextEventButton,
+        premiseDraftField, volumeDraftField, eventDraftField, saveUpperPlanDraftButton]) control.hidden = variableMode;
+      runUpperPlanButton.disabled = Boolean(view.variablePlanner) || upperPlanInFlight || Object.keys(view.configErrors).length > 0
+        || view.upperPresetReady === false || view.upperPlanRunning;
       keyStatus.textContent = view.config.key ? 'API 密钥已保存。' : '尚未填写密钥；无密钥接口可留空。';
       if (activeTab === 'presets' && previewStamp && previewContextHash && Date.now() - lastPreviewCheck > 5000) {
         lastPreviewCheck = Date.now(); const stamp = previewStamp;
@@ -2677,7 +2750,10 @@
     });
     retrySaveButton.addEventListener('click', async () => {
       retrySaveButton.disabled = true;
-      try { await options.retryPersist?.(); }
+      try {
+        if (options.getViewModel()?.variablePlannerError) await options.retryVariablePlannerPersistence?.();
+        if (options.getViewModel()?.persistenceError) await options.retryPersist?.();
+      }
       finally { render(false); }
     });
     runUpperPlanButton.addEventListener('click', async () => {
@@ -2702,6 +2778,21 @@
         upperPlanStatus.textContent = '手写或编辑的上层三纲已保存。';
         render(false);
       } catch (error) { upperPlanStatus.textContent = `保存失败：${error.message}`; }
+    });
+    saveVariablePlannerDraftButton.addEventListener('click', () => {
+      try {
+        const need = options.getVariablePlannerNeed?.() ?? { kind: 'initial' };
+        if (need.kind === 'initial') options.initializeVariablePlanner?.(variablePlannerDraft.value);
+        else if (need.kind === 'rewrite') options.appendVariablePlannerRewrite?.({ rawText: variablePlannerDraft.value });
+        else if (need.kind === 'ready') throw new Error('当前三层提纲都已就绪；请先完成正文阶段');
+        else options.appendVariablePlannerBatch?.({ kind: need.kind, rawText: variablePlannerDraft.value,
+          parentId: need.parentId, parentRevision: need.parentRevision, parentStageId: need.parentStageId });
+        variablePlannerDraft.value = '';
+        variablePlannerHelp.textContent = '新版变量规划已保存；父阶段关系和阶段 ID 由规划器维护。';
+        render(false);
+      } catch (error) {
+        variablePlannerHelp.textContent = `新版规划保存失败：${error.message}`;
+      }
     });
     activeEventSelect.addEventListener('change', () => {
       try {
@@ -3366,6 +3457,7 @@
     const disposers = [];
     let lastSentPrompt = null;
     let lastPreparedRequest = null;
+    let variablePlannerPersistQueue = Promise.resolve();
 
     function prepareRequest(preset, context) {
       const key = JSON.stringify({ preset, context });
@@ -3516,11 +3608,18 @@
       destroy: () => lifecycle.destroy(),
     };
     const gate = {
-      version: 2,
+      version: 3,
       isEnabled: () => config.enabled,
       describeFailure: error => classifyPlannerFailure(error).message,
       getChatIdentity: lifecycle.identity,
       getCurrentTurn: lifecycle.getCurrentTurn,
+      hasVariablePlannerState: () => Boolean(getVariablePlannerState()),
+      getVariablePlannerNeed,
+      getVariablePlannerSnapshot,
+      beginVariablePlannerTurn,
+      confirmVariablePlannerTurnInjected,
+      clearVariablePlannerTurn,
+      isVariablePlannerSnapshotCurrent,
       getActiveOutline({ chatIdentity, type = 'normal', recordId } = {}) {
         if (chatIdentity !== lifecycle.identity()) return null;
         const record = lifecycle.getActive(type);
@@ -3551,7 +3650,12 @@
       mainGenerationActive = false;
       // A microtask allows the final message/event to settle; stopped generations
       // must not prefetch an outline from a partial reply.
-      queueMicrotask(() => { if (!destroyed && !mainGenerationActive && !mainGenerationStopped) lifecycle.onMessage(); });
+      queueMicrotask(() => {
+        if (destroyed || mainGenerationActive || mainGenerationStopped) return;
+        if (!getVariablePlannerState()) lifecycle.onMessage();
+        try { settlePendingVariablePlannerReply(); }
+        catch (error) { log.warn?.('[剧情规划器][变量阶段结算]', error); }
+      });
     });
     subscribe(globals.tavern_events.GENERATION_STOPPED, () => {
       if (plannerOwnsSendControls) {
@@ -3571,9 +3675,20 @@
         lastPreparedRequest = null;
         panel?.invalidatePreview();
         if (eventKey === 'MESSAGE_RECEIVED' || eventKey === 'MESSAGE_SWIPED') {
-          if (!mainGenerationActive && !mainGenerationStopped) lifecycle.onMessage(eventKey);
+          if (!mainGenerationActive && !mainGenerationStopped) {
+            if (!getVariablePlannerState()) lifecycle.onMessage(eventKey);
+            try { settlePendingVariablePlannerReply(); }
+            catch (error) { log.warn?.('[剧情规划器][变量阶段结算]', error); }
+          }
         }
-        else lifecycle.invalidate(eventKey);
+        else {
+          lifecycle.invalidate(eventKey);
+          try {
+            reconcileVariablePlannerSettlements();
+            settlePendingVariablePlannerReply();
+          }
+          catch (error) { log.warn?.('[剧情规划器][变量分支对账]', error); }
+        }
       });
     }
     subscribe(globals.tavern_events.CHAT_CHANGED, () => {
@@ -3628,7 +3743,7 @@
     }
 
     function runNow() {
-      if (destroyed || Object.keys(validateConfig(config)).length || !hasEffectivePlannerPrompt(activePreset())) return false;
+      if (destroyed || getVariablePlannerState() || Object.keys(validateConfig(config)).length || !hasEffectivePlannerPrompt(activePreset())) return false;
       scheduler.schedule('manual');
       return true;
     }
@@ -3795,6 +3910,224 @@
         return { ...variables, [STATE_KEY]: { ...current, ...patch } };
       }, { type: 'chat' });
     }
+    function persistVariablePlannerChat(expectedChatId) {
+      const save = async () => {
+        const state = currentPlanningState();
+        if (globals.platform !== 'tauritavern' || typeof globals.persistVariables !== 'function') return { confirmed: false };
+        if (state?.chatId !== expectedChatId || state?.variablePlanner?.chatId !== expectedChatId) return { confirmed: false, stale: true };
+        try {
+          if (state.variablePlannerError) writeChatPlanningPatch({ variablePlannerError: null });
+          const result = await globals.persistVariables({ type: 'chat' });
+          return result;
+        } catch (error) {
+          const latest = currentPlanningState();
+          if (latest?.chatId === expectedChatId && latest?.variablePlanner?.chatId === expectedChatId) {
+            writeChatPlanningPatch({ variablePlannerError: '新版变量状态仍在本次会话中，但聊天保存失败；重试保存后再继续生成。' });
+            log.warn?.('[剧情规划器][新版变量状态保存]', error);
+          }
+          return { confirmed: false, error };
+        }
+      };
+      const pending = variablePlannerPersistQueue.then(save, save);
+      variablePlannerPersistQueue = pending.then(() => {}, () => {});
+      return pending;
+    }
+    function getVariablePlannerState({ create = false } = {}) {
+      const current = currentPlanningState() ?? {};
+      const chatId = current.chatId ?? lifecycle.getState().chatId;
+      const stored = current.variablePlanner;
+      if (stored?.schemaVersion === 1 && stored.chatId === chatId) return stored;
+      if (stored != null && stored.chatId && stored.chatId !== chatId) {
+        if (create) throw new Error('新版变量规划状态属于其他聊天；为保护原进度，未覆盖该状态');
+        return null;
+      }
+      if (stored != null && stored.schemaVersion !== 1) {
+        if (create) throw new Error('新版变量规划状态版本不兼容；为保护原进度，未覆盖该状态');
+        return null;
+      }
+      if (!create) return null;
+      const next = planningModel.createVariablePlannerState({ chatId });
+      writeChatPlanningPatch({ variablePlanner: next });
+      return next;
+    }
+    function saveVariablePlannerState(next) {
+      writeChatPlanningPatch({ variablePlanner: next, variablePlannerError: null });
+      void persistVariablePlannerChat(next.chatId);
+      return structuredClone(next);
+    }
+    function initializeVariablePlanner(rawText) {
+      const parsed = planningModel.parsePlannerOutput(rawText, { kind: 'initial' });
+      if (!parsed.ok) throw new Error(parsed.error);
+      const current = getVariablePlannerState({ create: true });
+      if (current.pendingTurn) throw new Error('本轮阶段快照正在使用，结束或停止生成后再修改计划');
+      const applied = planningModel.applyInitialPlan(current, parsed);
+      if (!applied.ok) throw new Error(applied.error);
+      lifecycle.invalidate('VARIABLE_PLANNER_ACTIVATED');
+      return saveVariablePlannerState(applied.state);
+    }
+    function appendVariablePlannerBatch({ kind, rawText, parentId, parentRevision, parentStageId } = {}) {
+      const parsed = planningModel.parsePlannerOutput(rawText, { kind });
+      if (!parsed.ok) throw new Error(parsed.error);
+      const current = getVariablePlannerState();
+      if (!current) throw new Error('请先创建新版变量剧情计划');
+      if (current.pendingTurn) throw new Error('本轮阶段快照正在使用，结束或停止生成后再补充提纲');
+      const appended = planningModel.appendOutlineBatch(current, { kind, parsed, parentId, parentRevision, parentStageId });
+      if (!appended.ok) throw new Error(appended.error);
+      return { state: saveVariablePlannerState(appended.state), nodes: structuredClone(appended.nodes) };
+    }
+    function getVariablePlannerSnapshot() {
+      const snapshot = planningModel.getActivePlanSnapshot(getVariablePlannerState());
+      return snapshot ? structuredClone(snapshot) : null;
+    }
+    function getVariablePlannerNeed() {
+      const state = getVariablePlannerState();
+      if (state?.pendingRewrite) return { kind: 'rewrite', ...structuredClone(state.pendingRewrite) };
+      return structuredClone(planningModel.getPlanningNeed(state));
+    }
+    function plannerReplyFingerprint(message) {
+      if (typeof message?.messageFingerprint === 'string' && message.messageFingerprint) return message.messageFingerprint;
+      const input = typeof message?.inputFingerprint === 'string' && message.inputFingerprint
+        ? message.inputFingerprint : fnv1a(JSON.stringify({ role: message?.role ?? null, content: message?.content ?? '' }));
+      return fnv1a(JSON.stringify({ role: message?.role ?? null, content: message?.content ?? '',
+        inputFingerprint: input, toolCalls: message?.toolCalls ?? null, toolCallId: message?.toolCallId ?? null }));
+    }
+    function plannerInputFingerprint(message) {
+      return typeof message?.inputFingerprint === 'string' && message.inputFingerprint
+        ? message.inputFingerprint : fnv1a(JSON.stringify({ role: message?.role ?? null, content: message?.content ?? '' }));
+    }
+    async function beginVariablePlannerTurn(inputId = null, expectedChatIdentity = null) {
+      const startingIdentity = lifecycle.identity();
+      if (expectedChatIdentity && startingIdentity !== expectedChatIdentity) throw new Error('聊天已切换');
+      const startingChatId = getVariablePlannerState()?.chatId;
+      await variablePlannerPersistQueue;
+      if (expectedChatIdentity && lifecycle.identity() !== expectedChatIdentity) throw new Error('聊天已切换');
+      const current = getVariablePlannerState();
+      if (!current) return null;
+      if (startingChatId && current.chatId !== startingChatId) throw new Error('聊天已切换');
+      if (currentPlanningState()?.variablePlannerError) {
+        const saved = await persistVariablePlannerChat(current.chatId);
+        if (saved?.error || currentPlanningState()?.variablePlannerError) {
+          throw new Error('新版变量剧情的聊天状态尚未保存成功，请先重试保存');
+        }
+      }
+      const need = getVariablePlannerNeed();
+      if (need.kind !== 'ready') return null;
+      const snapshot = planningModel.getActivePlanSnapshot(current);
+      if (!snapshot?.volume || !snapshot?.event || !snapshot?.fine) return null;
+      const messages = readAllMessages();
+      const latestUser = [...messages].reverse().find(message => message.role === 'user');
+      const inputMessageId = inputId ?? (latestUser ? String(latestUser.messageId) : null);
+      const inputMessage = messages.find(message => String(message.messageId) === String(inputMessageId) && message.role === 'user');
+      const pendingTurn = { inputId: inputMessageId,
+        inputFingerprint: inputMessage ? plannerInputFingerprint(inputMessage) : null,
+        snapshot, injected: false, boundAt: new Date().toISOString() };
+      saveVariablePlannerState({ ...current, pendingTurn, updatedAt: new Date().toISOString() });
+      await variablePlannerPersistQueue;
+      if (expectedChatIdentity && lifecycle.identity() !== expectedChatIdentity) throw new Error('聊天已切换');
+      if (currentPlanningState()?.variablePlannerError) {
+        clearVariablePlannerTurn();
+        throw new Error('新版变量剧情快照保存失败，本次酒馆回复已阻止');
+      }
+      return structuredClone(snapshot);
+    }
+    function confirmVariablePlannerTurnInjected(snapshot) {
+      const current = getVariablePlannerState();
+      if (!current?.pendingTurn || JSON.stringify(current.pendingTurn.snapshot) !== JSON.stringify(snapshot)
+        || JSON.stringify(planningModel.getActivePlanSnapshot(current)) !== JSON.stringify(snapshot)) return false;
+      saveVariablePlannerState({ ...current, pendingTurn: { ...current.pendingTurn, injected: true,
+        injectedAt: new Date().toISOString() }, updatedAt: new Date().toISOString() });
+      return true;
+    }
+    function clearVariablePlannerTurn() {
+      const current = getVariablePlannerState();
+      if (!current?.pendingTurn) return false;
+      const next = { ...current };
+      delete next.pendingTurn;
+      saveVariablePlannerState(next);
+      return true;
+    }
+    function retryVariablePlannerPersistence() {
+      const current = getVariablePlannerState();
+      return current ? persistVariablePlannerChat(current.chatId) : Promise.resolve({ confirmed: false });
+    }
+    function isVariablePlannerSnapshotCurrent(snapshot) {
+      const active = planningModel.getActivePlanSnapshot(getVariablePlannerState());
+      return Boolean(active && JSON.stringify(active) === JSON.stringify(snapshot));
+    }
+    function reconcileVariablePlannerSettlements() {
+      const current = getVariablePlannerState();
+      if (!current || !current.settlements?.length) return current;
+      const allMessages = readAllMessages();
+      const selected = allMessages.filter(message => message.role === 'assistant').map(message => {
+        const input = allMessages.findLast(candidate => candidate.role === 'user' && candidate.messageId < message.messageId);
+        return { replyId: String(message.messageId), replyFingerprint: plannerReplyFingerprint(message), rawText: message.content,
+          inputId: input ? String(input.messageId) : null, inputFingerprint: input ? plannerInputFingerprint(input) : null };
+      });
+      const reconciled = planningModel.reconcileSettlements(current, selected);
+      if (!reconciled.ok || !reconciled.changed) return current;
+      return saveVariablePlannerState(reconciled.state);
+    }
+    function settleVariablePlannerReply({ snapshot, rawText, replyId, replyFingerprint, inputId = null } = {}) {
+      const messages = readAllMessages();
+      const latest = messages.at(-1);
+      const normalizedReplyId = String(replyId ?? latest?.messageId ?? '');
+      if (!latest || latest.role !== 'assistant' || !isFinalNarrativeAssistant(messages)
+        || String(latest.messageId) !== normalizedReplyId) throw new Error('阶段回报只能结算当前选用的最终助手正文');
+      const fingerprint = replyFingerprint ?? plannerReplyFingerprint(latest);
+      if (fingerprint !== plannerReplyFingerprint(latest)) throw new Error('阶段回报的回复版本已失效');
+      const current = reconcileVariablePlannerSettlements() ?? getVariablePlannerState({ create: true });
+      const turn = current.pendingTurn;
+      if (!turn?.injected || !turn.snapshot) throw new Error('阶段回报没有对应的已注入阶段快照');
+      if (turn.inputId != null) {
+        const boundInput = messages.find(message => String(message.messageId) === String(turn.inputId) && message.role === 'user');
+        if (!boundInput || (turn.inputFingerprint && plannerInputFingerprint(boundInput) !== turn.inputFingerprint)) {
+          throw new Error('阶段回报绑定的玩家输入已变化');
+        }
+      }
+      const boundSnapshot = turn.snapshot;
+      if (snapshot && JSON.stringify(snapshot) !== JSON.stringify(boundSnapshot)) throw new Error('阶段回报快照与本轮注入记录不一致');
+      const parsed = planningModel.parsePlannerUpdate(rawText ?? latest.content);
+      if (!parsed.ok) throw new Error(parsed.error);
+      const settled = planningModel.settlePlannerUpdate(current, { snapshot: boundSnapshot, report: parsed.report,
+        replyId: normalizedReplyId, replyFingerprint: fingerprint, inputId: inputId ?? turn?.inputId ?? null,
+        inputFingerprint: turn?.inputFingerprint ?? null });
+      if (!settled.ok) throw new Error(settled.error);
+      const next = { ...settled.state };
+      delete next.pendingTurn;
+      if (!settled.duplicate || current.pendingTurn) saveVariablePlannerState(next);
+      return { duplicate: settled.duplicate, present: parsed.present, report: structuredClone(parsed.report),
+        state: structuredClone(next) };
+    }
+    function settlePendingVariablePlannerReply() {
+      const current = getVariablePlannerState();
+      if (!current?.pendingTurn) return null;
+      const messages = readAllMessages();
+      const latest = messages.at(-1);
+      if (!latest || latest.role !== 'assistant' || !isFinalNarrativeAssistant(messages)) return null;
+      const inputId = current.pendingTurn.inputId;
+      if (inputId != null && Number(latest.messageId) <= Number(inputId)) return null;
+      if (inputId != null) {
+        const boundInput = messages.find(message => String(message.messageId) === String(inputId) && message.role === 'user');
+        if (!boundInput || (current.pendingTurn.inputFingerprint
+          && plannerInputFingerprint(boundInput) !== current.pendingTurn.inputFingerprint)) {
+          clearVariablePlannerTurn();
+          return null;
+        }
+      }
+      return settleVariablePlannerReply({ snapshot: current.pendingTurn.snapshot, inputId,
+        replyId: latest.messageId, replyFingerprint: plannerReplyFingerprint(latest), rawText: latest.content });
+    }
+    function appendVariablePlannerRewrite({ targetNodeId, rawText } = {}) {
+      const current = getVariablePlannerState();
+      if (!current) throw new Error('请先创建新版变量剧情计划');
+      if (current.pendingTurn) throw new Error('本轮阶段快照正在使用，结束或停止生成后再重写提纲');
+      const targetKind = current.pendingRewrite?.targetKind;
+      const parsed = planningModel.parsePlannerOutput(rawText, { kind: 'rewrite', rewriteTarget: targetKind });
+      if (!parsed.ok) throw new Error(parsed.error);
+      const rewritten = planningModel.appendRewriteResult(current, { targetKind, targetNodeId, parsed });
+      if (!rewritten.ok) throw new Error(rewritten.error);
+      return { state: saveVariablePlannerState(rewritten.state), replacement: structuredClone(rewritten.replacement) };
+    }
     function persistChatPlanningState() {
       if (globals.platform === 'tauritavern' && typeof globals.persistVariables === 'function') {
         try { return Promise.resolve(globals.persistVariables({ type: 'chat' })).catch(() => ({ confirmed: false })); }
@@ -3922,6 +4255,8 @@
           savePresetState, checkPreset, previewPreset, checkPreviewFresh,
           generateUpperPlan, saveUpperPlanDraft, setActiveVolume, setActiveEvent,
           advanceActiveVolume, advanceActiveEvent,
+          getVariablePlannerNeed, initializeVariablePlanner, appendVariablePlannerBatch, appendVariablePlannerRewrite,
+          retryVariablePlannerPersistence,
           saveConfig: savePanelConfig,
           setChatRecordName,
           persistConfig: () => typeof globals.persistVariables === 'function'
@@ -3938,6 +4273,8 @@
       panel.open();
       return true;
     }
+
+    if (getVariablePlannerState()?.pendingTurn) clearVariablePlannerTurn();
 
     const runtime = {
       destroy() {
@@ -3967,6 +4304,25 @@
       savePresetState, checkPreset, previewPreset,
       generateUpperPlan, saveUpperPlanDraft, setActiveVolume, setActiveEvent,
       advanceActiveVolume, advanceActiveEvent,
+      getVariablePlannerState: () => {
+        const state = getVariablePlannerState();
+        return state ? structuredClone(state) : null;
+      },
+      getVariablePlannerSnapshot,
+      getVariablePlannerNeed,
+      hasVariablePlannerState: () => Boolean(getVariablePlannerState()),
+      initializeVariablePlanner,
+      appendVariablePlannerBatch,
+      beginVariablePlannerTurn,
+      confirmVariablePlannerTurnInjected,
+      clearVariablePlannerTurn,
+      isVariablePlannerSnapshotCurrent,
+      settleVariablePlannerReply,
+      reconcileVariablePlannerSettlements,
+      appendVariablePlannerRewrite,
+      retryVariablePlannerPersistence,
+      parseVariablePlannerOutput: planningModel.parsePlannerOutput,
+      parseVariablePlannerUpdate: planningModel.parsePlannerUpdate,
       fetchModels,
       schedule(reason) {
         if (config.enabled) scheduler.schedule(reason);
@@ -3984,6 +4340,7 @@
   }
 
   return {
+    planningModel,
     BUTTON_NAME,
     createDefaultPlannerPreset,
     importPlannerPreset,
