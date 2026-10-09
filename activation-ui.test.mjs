@@ -7,49 +7,6 @@ const require = createRequire(import.meta.url);
 const engine = require('./planner.js');
 const adapter = require('./runtime-adapter.js');
 
-test('manifest and runtime adapter use the same release version', () => {
-  const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.2.3');
-  assert.equal(adapter.VERSION, manifest.version);
-});
-
-test('header edits only the chat record label and can restore the Tavern name', async () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  let recordName = '2026-10-06@16h55m53s';
-  let customName = null;
-  const saved = [];
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config: { enabled: false }, status: 'disabled', configErrors: {},
-      chatDisplay: { identity: 'chat-1', prefix: '做卡 - ', recordName,
-        label: `做卡 - ${recordName}`, editable: true, customName } }),
-    setChatRecordName: async (name, identity) => {
-      saved.push([name, identity]);
-      customName = name || null;
-      recordName = customName || '2026-10-06@16h55m53s';
-    },
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const root = document.body.children[0];
-  const name = root.querySelector('[data-tw-action="chatRecordName"]');
-  assert.equal(name.textContent, '2026-10-06@16h55m53s');
-  name.click();
-  const input = root.querySelector('[data-tw-field="chatRecordName"]');
-  assert.equal(input.value, '2026-10-06@16h55m53s');
-  input.value = '第一幕';
-  await root.querySelector('[data-tw-action="saveChatRecordName"]').click();
-  assert.deepEqual(saved, [['第一幕', 'chat-1']]);
-  assert.equal(name.textContent, '第一幕');
-  name.click();
-  await root.querySelector('[data-tw-action="resetChatRecordName"]').click();
-  assert.deepEqual(saved.at(-1), ['', 'chat-1']);
-  assert.equal(name.textContent, '2026-10-06@16h55m53s');
-  panel.destroy();
-});
-
 class Element {
   constructor(tag, document) {
     this.tagName = tag; this.ownerDocument = document; this.children = []; this.dataset = {};
@@ -68,245 +25,78 @@ class Element {
   querySelector(selector) {
     const match = selector.match(/^\[data-tw-(action|field)="([^"]+)"\]$/);
     if (!match) return null;
+    const key = match[1] === 'action' ? 'twAction' : 'twField';
     const queue = [...this.children];
     while (queue.length) {
       const item = queue.shift();
-      if (item.dataset[match[1] === 'action' ? 'twAction' : 'twField'] === match[2]) return item;
+      if (item.dataset[key] === match[2]) return item;
       queue.push(...item.children);
     }
     return null;
   }
 }
 
-test('prominent activation button persists immediately and logs each state', () => {
+function panelFixture(planningState = {}) {
   const document = { createElement: tag => new Element(tag, document), body: null };
   document.body = new Element('body', document);
-  let config = { enabled: false, apiurl: '', key: '', model: '' };
-  const logs = [];
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config, status: config.enabled ? 'idle' : 'disabled', statusLabel: config.enabled ? '等待规划' : '自动规划已关闭', configErrors: {}, presetReady: false }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    saveConfig: draft => { config = { ...config, ...draft }; logs.push(config.enabled ? '已开启' : '已关闭'); return config; },
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const button = document.body.children[0].querySelector('[data-tw-action="toggleEnabled"]');
-  assert.ok(button);
-  assert.match(button.textContent, /开启/);
-  button.dispatch('click');
-  assert.equal(config.enabled, true);
-  assert.equal(button.attributes['aria-pressed'], 'true');
-  button.dispatch('click');
-  assert.equal(config.enabled, false);
-  const nodes = [...document.body.children];
-  for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
-  assert.equal(nodes.some(node => node.dataset.twField === 'settingsEnabled'), false);
-  assert.deepEqual(logs, ['已开启', '已关闭']);
-  panel.destroy();
-});
-
-test('result page renders ordered floor history as safe outline text and exposes retry setting', () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const config = { enabled: true, apiurl: 'https://api.example/v1', model: 'model', retryCount: 3 };
-  const history = [
-    { id: 'a', sequence: 1, sourceMessageId: 1, usedMessageId: 2, status: 'used', purpose: 'initial', body: '<script>保留原文</script>' },
-    { id: 'b', sequence: 2, sourceMessageId: 2, usedMessageId: null, status: 'ready', purpose: 'next', body: '下一轮内容' },
-  ];
-  const panel = engine.createPlannerPanel({
-    document, getViewModel: () => ({ config, status: 'ready', statusLabel: '已完成', configErrors: {}, outlineHistory: history }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const queue = [...document.body.children];
-  const nodes = [];
-  while (queue.length) { const node = queue.shift(); nodes.push(node); queue.push(...node.children); }
-  const list = nodes.find(node => node.dataset.twView === 'outlineHistory');
-  assert.equal(list.children.length, 1);
-  const summary = list.children[0].children[0];
-  assert.match(summary.children[1].children[1].textContent, /来源 #1 → 用于 #2/);
-  assert.equal(list.children[0].children.at(-1).textContent, '<script>保留原文</script>');
-  const current = nodes.find(node => node.dataset.twView === 'outlineBody');
-  assert.equal(current.children.at(-1).textContent, '下一轮内容');
-  assert.match(current.children[0].children[1].textContent, /来源楼层 2/);
-  assert.equal(nodes.find(node => node.dataset.twField === 'retryCount').value, '3');
-  panel.destroy();
-});
-
-test('result page does not render invalid, superseded, or unmatched candidate outlines', () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const config = { enabled: true, apiurl: 'https://api.example/v1', model: 'model' };
-  const panel = engine.createPlannerPanel({
-    document, getViewModel: () => ({ config, status: 'ready', statusLabel: '已完成', configErrors: {},
-      outlineBody: '', outlineHistory: [
-        { id: 'invalid', sequence: 1, status: 'invalid', body: '不应出现的失效正文' },
-        { id: 'superseded', sequence: 2, status: 'superseded', body: '不应出现的替代正文' },
-        { id: 'candidate', sequence: 3, status: 'ready', inputPending: true, body: '等待输入的候选' },
-        { id: 'used', sequence: 4, status: 'used', sourceMessageId: 2, usedMessageId: 4, body: '已使用细纲' },
-        { id: 'ready', sequence: 5, status: 'ready', sourceMessageId: 4, body: '当前细纲' },
-      ] }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const queue = [...document.body.children];
-  const nodes = [];
-  while (queue.length) { const node = queue.shift(); nodes.push(node); queue.push(...node.children); }
-  const history = nodes.find(node => node.dataset.twView === 'outlineHistory');
-  assert.equal(history.children.length, 1);
-  assert.equal(history.children[0].dataset.recordId, 'used');
-  assert.doesNotMatch(nodes.map(node => node.textContent).join('\n'), /已失效|已替代|不应出现|等待输入的候选/);
-  const current = nodes.find(node => node.dataset.twView === 'outlineBody');
-  assert.equal(current.children.at(-1).textContent, '当前细纲');
-  panel.destroy();
-});
-
-test('outline card gives event content priority and uses SVG icons for time and place', () => {
-  const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const body = '时间: 雨夜\n地点: 林家旧宅\n事件内容: 林澈发现遗失的信件。';
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config: { enabled: true }, status: 'ready', statusLabel: '已完成', configErrors: {},
-      outlineHistory: [{ id: 'a', sequence: 1, status: 'ready', body }] }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const nodes = [...document.body.children];
-  for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
-  assert.equal(nodes.find(node => node.className === 'twsp-outline-event')?.textContent, '林澈发现遗失的信件。');
-  assert.equal(nodes.filter(node => node.className === 'twsp-outline-meta-item').length, 2);
-  assert.equal(nodes.filter(node => node.tagName === 'svg' && node.attributes['aria-hidden'] === 'true').length >= 2, true);
-  const feature = nodes.find(node => node.dataset.twView === 'outlineBody');
-  const rawDetails = feature.children[1].children.at(-1);
-  rawDetails.open = true;
-  panel.render(false);
-  assert.equal(feature.children[1].children.at(-1), rawDetails);
-  assert.equal(rawDetails.open, true);
-  panel.destroy();
-});
-
-test('settings UI states whether the host confirmed the save', async () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  let config = { enabled: true, apiurl: 'https://api.example/v1', key: '', model: 'planner' };
-  const confirmations = [{ confirmed: true }, { confirmed: false }];
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config, status: 'idle', statusLabel: '等待规划', configErrors: {}, presetReady: false }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    saveConfig: draft => { config = { ...config, ...draft }; return config; },
-    persistConfig: async () => confirmations.shift(),
+  const presetState = engine.normalizePlannerPresetState({});
+  const panel = engine.createPlannerPanel({ document,
+    getViewModel: () => ({ ...engine.buildPanelViewModel({ enabled: true }, planningState),
+      chatLabel: '测试聊天', variablePlannerRunning: false }),
+    getPresetState: () => presetState,
     setInterval: () => 1, clearInterval() {},
   });
   panel.open();
   const root = document.body.children[0];
-  const save = root.querySelector('[data-tw-action="save"]');
-  const nodes = [...root.children];
-  let checkStatus;
-  while (nodes.length) {
-    const node = nodes.shift();
-    if (node.dataset.twView === 'checkStatus') checkStatus = node;
-    nodes.push(...node.children);
-  }
-  await save.dispatch('click');
-  assert.match(checkStatus.textContent, /保存已确认/);
-  await save.dispatch('click');
-  assert.match(checkStatus.textContent, /尚无落盘确认/);
+  const nodes = [root];
+  for (let index = 0; index < nodes.length; index += 1) nodes.push(...nodes[index].children);
+  return { panel, root, nodes };
+}
+
+test('manifest and runtime adapter use the same release version', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
+  assert.equal(adapter.VERSION, manifest.version);
+});
+
+test('result page shows four current layers and no legacy planning controls', () => {
+  const { panel, root, nodes } = panelFixture();
+  const headings = nodes.filter(node => node.tagName === 'h4').map(node => node.textContent);
+  assert.deepEqual(headings.filter(label => ['总纲', '卷纲', '事件纲', '细纲'].includes(label)),
+    ['总纲', '卷纲', '事件纲', '细纲']);
+  assert.ok(root.querySelector('[data-tw-field="variablePlannerDraft"]'));
+  assert.equal(root.querySelector('[data-tw-action="runUpperPlan"]'), null);
+  assert.equal(root.querySelector('[data-tw-action="run"]'), null);
+  assert.equal(root.querySelector('[data-tw-field="upperPremiseDraft"]'), null);
   panel.destroy();
 });
 
-test('preset cards keep selection, editing, enable and management controls available', () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const preset = engine.createDefaultPlannerPreset();
-  preset.prompts.push({ identifier: 'intro', name: '规划器身份', role: 'system', content: '剧情规则', enabled: true });
-  preset.promptOrder.push({ identifier: 'intro', enabled: true });
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config: { enabled: true }, status: 'idle', configErrors: {} }),
-    getPresetState: () => ({ plannerPresets: [preset], activePlannerPresetId: preset.id }),
-    setInterval: () => 1, clearInterval() {},
+test('current plan view model ignores legacy outline history', () => {
+  const view = engine.buildPanelViewModel({ enabled: true }, {
+    activeOutline: '<outline>旧细纲</outline>', outlineHistory: [{ body: '旧细纲', status: 'ready' }],
   });
-  panel.open();
-  const root = document.body.children[0];
-  for (const action of ['newPreset', 'importPresetButton', `exportPreset-${preset.id}`, `editPreset-${preset.id}`, `deletePreset-${preset.id}`, 'addPrompt', 'checkPreset', 'previewPreset', 'copyCurrentPrompt', 'savePreset']) {
-    assert.ok(root.querySelector(`[data-tw-action="${action}"]`), `${action} remains available`);
-  }
-  const title = root.querySelector('[data-tw-action="title-intro"]');
-  const editor = root.querySelector('[data-tw-action="edit-intro"]');
-  assert.ok(title && editor);
-  title.dispatch('click');
-  assert.equal(editor.attributes['aria-expanded'], 'true');
-  assert.ok(root.querySelector('[data-tw-action="remove-intro"]'));
-  const queue = [...root.children];
-  for (let i = 0; i < queue.length; i++) queue.push(...queue[i].children);
-  const enabled = queue.find(node => node.dataset.twField === 'promptEnabled-intro');
-  const card = queue.find(node => node.dataset.twView === 'promptCard-intro');
-  enabled.checked = false;
-  enabled.dispatch('change');
-  assert.equal(card.dataset.enabled, 'false');
-  panel.destroy();
+  assert.equal(view.variablePlanner, null);
+  assert.equal(view.variablePlannerNeed.kind, 'initial');
+  assert.equal(Object.hasOwn(view, 'outlineHistory'), false);
 });
 
-test('upper three-layer planning and fine planning can use different presets', () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  const outlinePreset = { ...engine.createDefaultPlannerPreset(), id: 'upper-role', name: '上层预设' };
-  const finePreset = { ...engine.createDefaultPlannerPreset(), id: 'fine-role', name: '细纲预设' };
-  let state = engine.normalizePlannerPresetState({ plannerPresets: [outlinePreset, finePreset],
-    activeOutlinePresetId: outlinePreset.id, activeFinePresetId: finePreset.id });
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config: { enabled: false }, status: 'disabled', configErrors: {} }),
-    getPresetState: () => state,
-    savePresetState: draft => { state = engine.normalizePlannerPresetState(draft); return state; },
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const root = document.body.children[0];
-  assert.equal(root.querySelector('[data-tw-field="activeOutlinePreset"]').value, outlinePreset.id);
-  assert.equal(root.querySelector('[data-tw-field="activeFinePreset"]').value, finePreset.id);
-  const upperSelect = root.querySelector('[data-tw-field="activeOutlinePreset"]');
-  upperSelect.value = finePreset.id;
-  upperSelect.dispatch('change');
-  assert.equal(state.activeOutlinePresetId, finePreset.id);
-  assert.equal(state.activeFinePresetId, finePreset.id);
-  const fineSelect = root.querySelector('[data-tw-field="activeFinePreset"]');
-  fineSelect.value = outlinePreset.id;
-  fineSelect.dispatch('change');
-  assert.equal(state.activeOutlinePresetId, finePreset.id);
-  assert.equal(state.activeFinePresetId, outlinePreset.id);
-  panel.destroy();
-});
-
-test('result page can retry a failed metadata save without requesting another outline', async () => {
-  const document = { createElement: tag => new Element(tag, document), body: null };
-  document.body = new Element('body', document);
-  let persistenceError = '聊天保存失败';
-  let retries = 0;
-  let plannerCalls = 0;
-  const panel = engine.createPlannerPanel({
-    document,
-    getViewModel: () => ({ config: { enabled: true, apiurl: 'https://api.example/v1', model: 'planner' },
-      status: 'ready', statusLabel: '已完成', configErrors: {}, persistenceError, outlineHistory: [] }),
-    getPresetState: () => ({ plannerPresets: [engine.createDefaultPlannerPreset()], activePlannerPresetId: 'tw-planner-default' }),
-    retryPersist: async () => { retries += 1; persistenceError = ''; return true; },
-    runNow: () => { plannerCalls += 1; },
-    setInterval: () => 1, clearInterval() {},
-  });
-  panel.open();
-  const root = document.body.children[0];
-  const retry = root.querySelector('[data-tw-action="retrySave"]');
-  assert.ok(retry);
-  assert.equal(retry.hidden, false);
-  await retry.dispatch('click');
-  assert.equal(retries, 1);
-  assert.equal(plannerCalls, 0);
-  assert.equal(retry.hidden, true);
+test('current stage cards show named goals before the full raw tags', () => {
+  const state = {
+    chatId: 'chat-A', planRevision: 1,
+    overall: { id: 'overall', revision: 1, body: '核心主题: 成长\n主角起点: 山村', fullTag: '<overall_outline>...</overall_outline>' },
+    volumes: [{ id: 'volume', revision: 1, parentId: 'overall', parentRevision: 1,
+      body: '卷名: 第一卷\n本卷目标: 入城', fullTag: '<volume_outline>...</volume_outline>',
+      stages: [{ id: 'volume-stage', index: 0, title: '关键事件1', content: '找到信件', completed: false }] }],
+    events: [{ id: 'event', revision: 1, parentId: 'volume', parentRevision: 1,
+      parentStageId: 'volume-stage', body: '事件名: 信件\n事件目标: 拿到信件',
+      fullTag: '<event_outline>...</event_outline>',
+      stages: [{ id: 'event-stage', index: 0, title: '阶段1', content: '入宅', completed: false }] }],
+    fines: [{ id: 'fine', revision: 1, parentId: 'event', parentRevision: 1,
+      parentStageId: 'event-stage', body: '阶段1: 搜索', fullTag: '<fine_outline>...</fine_outline>',
+      stages: [{ id: 'fine-stage', index: 0, title: '阶段1', content: '搜索书房', completed: false }] }],
+  };
+  const { panel, nodes } = panelFixture({ variablePlanner: state });
+  const details = nodes.filter(node => node.tagName === 'dd').map(node => node.textContent);
+  assert.deepEqual(details, ['成长', '山村', '第一卷', '入城', '信件', '拿到信件']);
+  assert.ok(nodes.some(node => node.className === 'twsp-layer-content' && node.textContent === '搜索书房'));
   panel.destroy();
 });

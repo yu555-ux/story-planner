@@ -198,7 +198,7 @@ test('native planner accepts an endpoint suffix but rejects query credentials it
   assert.throws(() => normalizeApiBase('https://api.example/v1?token=secret'), /query parameters/);
 });
 
-test('native host stores global planner settings and per-chat outline in SillyTavern storage', () => {
+test('native host stores API settings and four-layer state in SillyTavern storage', () => {
   const { context } = contextFixture();
   let settingsSaved = 0;
   let metadataSaved = 0;
@@ -206,11 +206,20 @@ test('native host stores global planner settings and per-chat outline in SillyTa
   context.saveMetadataDebounced = () => { metadataSaved += 1; };
   const host = createNativeHost(context);
   host.updateVariablesWith(value => ({ ...value, config: { apiurl: 'https://api.example/v1' } }), { type: 'script' });
-  host.updateVariablesWith(value => ({ ...value, __tw_story_planner_v1: { activeOutline: '<outline>下一幕</outline>' } }), { type: 'chat' });
+  host.updateVariablesWith(value => ({ ...value, __tw_story_planner_v1: { variablePlanner: { chatId: 'chat-1', overall: { body: '主题' } } } }), { type: 'chat' });
   assert.equal(host.getVariables({ type: 'script' }).config.apiurl, 'https://api.example/v1');
-  assert.equal(host.getVariables({ type: 'chat' }).__tw_story_planner_v1.activeOutline, '<outline>下一幕</outline>');
+  assert.equal(host.getVariables({ type: 'chat' }).__tw_story_planner_v1.variablePlanner.overall.body, '主题');
   assert.equal(settingsSaved, 1);
   assert.equal(metadataSaved, 1);
+});
+
+test('native host does not import the removed chat outline state', () => {
+  const { context } = contextFixture();
+  context.chatMetadata = { variables: { __tw_story_planner_v1: { activeOutline: '<outline>旧细纲</outline>' } } };
+  const host = createNativeHost(context);
+  assert.equal(host.getVariables({ type: 'chat' }).__tw_story_planner_v1, undefined);
+  assert.equal(context.chatMetadata.extensions?.['tw-story-planner-v1']?.__tw_story_planner_v1, undefined);
+  host.destroy();
 });
 
 test('settings confirmation follows the save callback result and does not claim a void debounce is durable', async () => {
@@ -229,14 +238,6 @@ test('settings confirmation follows the save callback result and does not claim 
   assert.deepEqual(await host.persistVariables({ type: 'script' }), { type: 'script', confirmed: false });
   assert.equal(calls, 2);
   host.destroy();
-});
-
-test('native host copies legacy chat outline into the new extension namespace shape', () => {
-  const { context } = contextFixture();
-  context.chatMetadata = { variables: { __tw_story_planner_v1: { activeOutline: '<outline>旧细纲</outline>' } } };
-  const host = createNativeHost(context);
-  assert.equal(host.getVariables({ type: 'chat' }).__tw_story_planner_v1.activeOutline, '<outline>旧细纲</outline>');
-  assert.equal(context.chatMetadata.extensions['tw-story-planner-v1'].__tw_story_planner_v1.activeOutline, '<outline>旧细纲</outline>');
 });
 
 test('native host resolves the current chat metadata again after a chat switch', () => {
@@ -492,26 +493,6 @@ test('planner parses the raw Chat Completion response returned by SillyTavern', 
   assert.equal(toolResult.value.rawText, '<outline>工具细纲</outline>');
 });
 
-test('result view exposes only the current saved outline body', () => {
-  const view = planner.buildPanelViewModel({ enabled: true }, {
-    schemaVersion: 2,
-    status: 'ready',
-    rawText: '模型前言<outline>旧细纲</outline>模型尾注',
-    activeOutline: '<outline>\n第一幕：雨夜相遇\n</outline>',
-    outlineHistory: [{ id: 'current', status: 'ready', fullTag: '<outline>\n第一幕：雨夜相遇\n</outline>', body: '第一幕：雨夜相遇' }],
-    lastError: '此前的请求失败',
-  });
-  assert.equal(view.outlineBody, '第一幕：雨夜相遇');
-  assert.equal(view.rawText, undefined);
-  assert.equal(view.legacyText, undefined);
-
-  const noActiveOutline = planner.buildPanelViewModel({ enabled: true }, {
-    schemaVersion: 2,
-    rawText: '<outline>尚未保存的结果</outline>',
-  });
-  assert.equal(noActiveOutline.outlineBody, '');
-});
-
 test('native host mounts a matching wand menu item that opens and cleans up', () => {
   const { context } = contextFixture();
   const menu = menuElement('div');
@@ -523,7 +504,7 @@ test('native host mounts a matching wand menu item that opens and cleans up', ()
   assert.ok(menuItem);
   assert.ok(menuItem.className.split(' ').includes('list-group-item'));
   assert.ok(menuItem.children[0].className.includes('extensionsMenuExtensionButton'));
-  assert.equal(menuItem.children[1].textContent, '剧情规划器');
+  assert.equal(menuItem.children[1].textContent, '变量剧情器');
   let opened = 0;
   host.eventOn(host.getButtonEvent(), () => { opened += 1; });
   menuItem.dispatch('click');
@@ -553,7 +534,7 @@ test('native host mounts the wand entry when the menu appears after startup', ()
   menu = menuElement('div');
   document.body.append(menu);
   onMutation();
-  assert.equal(menu.children[0]?.children[0]?.children[1]?.textContent, '剧情规划器');
+  assert.equal(menu.children[0]?.children[0]?.children[1]?.textContent, '变量剧情器');
   assert.equal(disconnected, true);
   host.destroy();
 });
@@ -607,20 +588,4 @@ test('native host accepts the host-provided message edited event and exposes its
   host.eventOn(host.tavern_events.MESSAGE_EDITED, () => {});
   assert.equal(listeners.has('message_edited'), true);
   host.destroy();
-});
-
-test('panel view model exposes only ready, using, and used outlines and hides pending candidates', () => {
-  const view = planner.buildPanelViewModel({ enabled: true }, {
-    activeOutline: '<outline>当前细纲</outline>',
-    outlineHistory: [
-      { id: 'invalid', status: 'invalid', body: '不应展示的失效正文' },
-      { id: 'superseded', status: 'superseded', body: '不应展示的替代正文' },
-      { id: 'candidate', status: 'ready', inputPending: true, body: '等待玩家输入的候选' },
-      { id: 'ready', status: 'ready', fullTag: '<outline>当前细纲</outline>', body: '当前细纲' },
-      { id: 'used', status: 'used', body: '已使用细纲' },
-    ],
-  });
-  assert.deepEqual(view.outlineHistory.map(record => record.id), ['ready', 'used']);
-  assert.equal(view.outlineBody, '当前细纲');
-  assert.doesNotMatch(JSON.stringify(view), /invalid|superseded|候选|不应展示/);
 });

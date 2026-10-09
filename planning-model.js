@@ -45,7 +45,7 @@
 
   function findFieldLines(body, field) {
     const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`^\\s*${escaped}\\s*[:：]\\s*(.*)$`, 'gm');
+    const pattern = new RegExp(`^[ \\t]*${escaped}[ \\t]*[:：][ \\t]*(.*)$`, 'gm');
     return [...body.matchAll(pattern)];
   }
 

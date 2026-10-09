@@ -6,7 +6,7 @@
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
-  const VERSION = '0.2.3';
+  const VERSION = '0.4.0';
   const STATE_KEY = '__tw_story_planner_v1';
   const BUTTON_EVENT = 'tw-story-planner-v1:open';
   const clone = value => value == null ? value : structuredClone(value);
@@ -305,12 +305,6 @@
       if (metadata.extensions[EXTENSION_ID] && typeof metadata.extensions[EXTENSION_ID] === 'object') {
         return clone(metadata.extensions[EXTENSION_ID]);
       }
-      const legacyState = metadata.variables?.[STATE_KEY];
-      if (legacyState && typeof legacyState === 'object') {
-        metadata.extensions[EXTENSION_ID] = { [STATE_KEY]: clone(legacyState) };
-        liveContext().saveMetadataDebounced?.();
-        return clone(metadata.extensions[EXTENSION_ID]);
-      }
       metadata.extensions[EXTENSION_ID] = {};
       return {};
     }
@@ -384,12 +378,12 @@
       button.className = 'list-group-item flex-container flexGap5';
       button.tabIndex = 0;
       button.setAttribute('role', 'button');
-      button.setAttribute('aria-label', '打开剧情规划器');
+      button.setAttribute('aria-label', '打开变量剧情器');
       const icon = document.createElement('div');
       icon.className = 'fa-fw fa-solid fa-scroll extensionsMenuExtensionButton';
       icon.setAttribute('aria-hidden', 'true');
       const label = document.createElement('span');
-      label.textContent = '剧情规划器';
+      label.textContent = '变量剧情器';
       button.append(icon, label);
       button.addEventListener('click', () => { for (const listener of buttonListeners) listener(); });
       button.addEventListener('keydown', event => {

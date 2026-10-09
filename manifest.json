@@ -1,5 +1,5 @@
 {
-  "display_name": "剧情规划器",
+  "display_name": "变量剧情器",
   "author": "TavernWeave",
   "version": "0.4.0",
   "js": "index.js",
