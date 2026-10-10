@@ -27,12 +27,47 @@
     historyLimit: 12,
   });
   const DEFAULT_PRESET_ID = 'tw-planner-default';
+  const DEFAULT_PRESET_VERSION = 'variable-story-default-v2';
   const MAX_PRESET_PROMPT_LENGTH = 250_000;
   const MAX_PRESET_JSON_LENGTH = 1_000_000;
   const MARKERS = new Set(['personaDescription', 'charDescription', 'charPersonality', 'scenario', 'dialogueExamples', 'chatHistory', 'worldInfoBefore', 'worldInfoAfter']);
+  const DEFAULT_FINE_OUTLINE_PROMPT = `细纲用<fine_outline></fine_outline>标签包裹，写5-10个阶段
+格式:\x20
+<fine_outline>
+阶段x:\x20
+  剧情目的:\x20
+  时间:\x20
+  地点:\x20
+  核心情节:
+  结尾收束:\x20\x20
+</fine_outline>
+举例:\x20
+<fine_outline>
+剧情目的: 交代陈戈的金手指，铺垫“死而复生是奇迹”的概念
+时间: 2026年7月6日-19:00 →2026年7月6日-19:05
+地点: 幸福小区11号楼202室
+核心情节:
+  - 主角头疼苏醒，发现穿越
+  - 主角激活“多子多福系统”
+结尾收束: 系统发布第一个任务
+</fine_outline>
+`;
+  function applyBundledPresetDefinition(preset) {
+    const prompts = new Map(preset.prompts.map(item => [item.identifier, item]));
+    const fine = prompts.get('f65144f0-d39e-43e6-84e7-5c1d78a1a23d');
+    if (fine) {
+      fine.content = DEFAULT_FINE_OUTLINE_PROMPT;
+      delete fine.injection_trigger;
+    }
+    const format = prompts.get('297f2750-fa3c-4272-95d0-ae32a0cd7c7f');
+    if (format) delete format.injection_trigger;
+    const summary = prompts.get('0fb9ef19-6676-4acb-a844-6c870a81a2df');
+    if (summary) summary.content = '最终按提纲标签排列，分别输出对应内容即可喵';
+    return preset;
+  }
   function createDefaultPlannerPreset() {
     if (!defaultPresetSource) return { id: DEFAULT_PRESET_ID, name: '变量剧情器', prompts: [], promptOrder: [], raw: {} };
-    return { ...importPlannerPreset(defaultPresetSource, '变量剧情器.json'), id: DEFAULT_PRESET_ID };
+    return { ...applyBundledPresetDefinition(importPlannerPreset(defaultPresetSource, '变量剧情器.json')), id: DEFAULT_PRESET_ID };
   }
   function selectPromptOrder(groups) {
     const valid = (Array.isArray(groups) ? groups : []).map((group, index) => ({
@@ -374,11 +409,13 @@
   }
   function normalizePlannerPresetState(raw) {
     const presets = Array.isArray(raw?.plannerPresets) ? raw.plannerPresets.filter(item => isRecord(item) && Array.isArray(item.prompts) && Array.isArray(item.promptOrder)) : [];
-    const chosen = presets.length > 1 && defaultPresetSource ? createDefaultPlannerPreset()
+    const isCurrentDefault = raw?.defaultPresetVersion === DEFAULT_PRESET_VERSION;
+    const chosen = !isCurrentDefault ? createDefaultPlannerPreset()
       : presets.find(item => item.id === raw?.activeFinePresetId && item.promptOrder.length)
       ?? presets.find(item => item.id === raw?.activeOutlinePresetId && item.promptOrder.length)
       ?? presets.find(item => item.promptOrder.length) ?? presets[0] ?? createDefaultPlannerPreset();
-    return { plannerPresets: [chosen], activeOutlinePresetId: chosen.id, activeFinePresetId: chosen.id };
+    return { plannerPresets: [chosen], activeOutlinePresetId: chosen.id, activeFinePresetId: chosen.id,
+      defaultPresetVersion: DEFAULT_PRESET_VERSION };
   }
   function validatePlannerPreset(preset) {
     const errors = [];
@@ -1493,14 +1530,6 @@
     grid.append(apiurl.wrapper, key.wrapper, modelField);
     const paramsGrid = element('div', 'twsp-grid twsp-params-grid');
     paramsGrid.append(timeout.wrapper, retryCount.wrapper, parameterRow);
-    const multiCallButton = button('多次调用：关闭', 'toggleMultiCall');
-    multiCallButton.setAttribute('role', 'switch');
-    multiCallButton.setAttribute('aria-checked', 'false');
-    multiCallButton.className += ' twsp-multi-call-toggle';
-    const multiCallSetting = element('div', 'twsp-multi-call-setting');
-    multiCallSetting.append(element('div', '', '分层生成'),
-      element('p', 'twsp-hint', '关闭：一次请求生成当前缺少的层级；开启：上三纲与细纲分开请求。'), multiCallButton);
-    paramsGrid.append(multiCallSetting);
     const advanced = element('div', 'twsp-advanced');
     const keyStatus = mark(element('p', 'twsp-hint'), 'view', 'keyStatus');
     const checkStatus = mark(element('p', 'twsp-hint'), 'view', 'checkStatus');
@@ -1544,6 +1573,13 @@
     presetName.wrapper.className += ' twsp-preset-editname';
     presetName.wrapper.hidden = true;
     const presetCards = mark(element('div', 'twsp-preset-cards'), 'view', 'presetCards');
+    const multiCallButton = button('多次调用：关闭', 'toggleMultiCall');
+    multiCallButton.setAttribute('role', 'switch');
+    multiCallButton.setAttribute('aria-checked', 'false');
+    multiCallButton.className += ' twsp-multi-call-toggle';
+    const multiCallSetting = element('section', 'twsp-multi-call-setting');
+    multiCallSetting.append(element('div', '', '分层生成'),
+      element('p', 'twsp-hint', '关闭：一次请求生成当前缺少的层级；开启：上三纲与细纲分开请求。'), multiCallButton);
     const presetCompatibility = mark(element('div', 'twsp-preset-compat'), 'view', 'presetCompatibility');
     const presetRows = element('div', 'twsp-prompt-list');
     const presetStatus = mark(element('p', 'twsp-hint'), 'view', 'presetStatus');
@@ -1560,8 +1596,8 @@
     addPromptButton.className += ' twsp-add-prompt';
     const promptSectionHeading = element('div', 'twsp-list-heading twsp-prompt-list-heading');
     promptSectionHeading.append(element('h4', '', '提示词'), addPromptButton);
-    presetsPanel.append(presetsHeading, presetCards, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
-      element('p', 'twsp-hint twsp-preset-footnote', '规划请求只发送预设消息，不追加隐藏提示词。任务说明可使用 {{planner_kind}}、{{planner_scope}} 和 {{planner_context}}；温度与最大 token 以设置页为准。'));
+    presetsPanel.append(presetsHeading, presetCards, multiCallSetting, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
+      element('p', 'twsp-hint twsp-preset-footnote', '规划请求只发送当前预设中启用的词块；温度与最大 token 以设置页为准。'));
     shell.append(header, tabs, resultPanel, settingsPanel, presetsPanel);
     root.append(style, shell);
     doc.body.append(root);
@@ -2324,7 +2360,7 @@
     let config = normalizeConfig({ ...DEFAULT_CONFIG, ...requestedConfig });
     const storedPresetState = globals.getVariables({ type: 'script' });
     let presetState = normalizePlannerPresetState(storedPresetState);
-    if ((storedPresetState?.plannerPresets?.length ?? 0) > 1) {
+    if (storedPresetState?.defaultPresetVersion !== DEFAULT_PRESET_VERSION || (storedPresetState?.plannerPresets?.length ?? 0) !== 1) {
       globals.updateVariablesWith(variables => ({ ...variables, ...presetState }), { type: 'script' });
     }
     const log = globals.console ?? console;
