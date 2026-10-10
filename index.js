@@ -1,5 +1,6 @@
 import './runtime-adapter.js';
 import './planning-model.js';
+import './default-preset.js';
 import './planner.js';
 import './generation-gate.js';
 import './startup.js';

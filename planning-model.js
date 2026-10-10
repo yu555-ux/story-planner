@@ -24,7 +24,7 @@
   const REQUIRED_FIELDS = Object.freeze({
     overall: ['核心主题', '主角起点', '主线目标', '故事基调'],
     volume: ['卷名', '本卷定位', '本卷目标', '核心剧情', '关键事件', '结尾收束'],
-    event: ['事件名', '事件定位', '事件目标', '核心剧情'],
+    event: ['事件名', '事件目标', '核心剧情'],
   });
   const REQUIRED_STAGE_FIELDS = Object.freeze({
     event: ['阶段目标', '核心情节', '结尾收束'],
@@ -89,7 +89,12 @@
       const match = lines[index].match(/^\s*(阶段[^:：\r\n]*?)\s*[:：]\s*$/);
       if (match) starts.push({ index, title: match[1].trim() });
     }
-    if (!starts.length) return fail(`${kind === 'event' ? '事件纲' : '细纲'}至少需要一个“阶段x”`);
+    if (!starts.length && kind === 'fine') {
+      const missing = validateFields(body, REQUIRED_STAGE_FIELDS.fine, '细纲');
+      if (missing) return fail(`细纲${missing}`);
+      return { ok: true, stages: [{ index: 0, title: '阶段1', content: body.trim() }] };
+    }
+    if (!starts.length) return fail('事件纲至少需要一个“阶段x”');
     const required = REQUIRED_STAGE_FIELDS[kind];
     const stages = [];
     for (let position = 0; position < starts.length; position += 1) {
@@ -150,15 +155,21 @@
     return { ok: true, blocks };
   }
 
-  function parsePlannerOutput(rawText, { kind, rewriteTarget } = {}) {
+  function parsePlannerOutput(rawText, { kind, rewriteTarget, mode } = {}) {
     const extracted = extractTaggedBlocks(rawText);
     if (!extracted.ok) return extracted;
     const blocks = extracted.blocks;
     let expectedKinds;
-    if (kind === 'initial') expectedKinds = new Set(['overall', 'volume']);
+    if (mode === 'single') {
+      expectedKinds = new Set(({ initial: ['overall', 'volume', 'event', 'fine'],
+        volume: ['volume', 'event', 'fine'], event: ['event', 'fine'], fine: ['fine'] })[kind] ?? []);
+    } else if (mode === 'split') {
+      expectedKinds = new Set(({ initial: ['overall', 'volume', 'event'],
+        volume: ['volume', 'event'], event: ['event'], fine: ['fine'] })[kind] ?? []);
+    } else if (kind === 'initial') expectedKinds = new Set(['overall', 'volume']);
     else if (kind === 'volume' || kind === 'event' || kind === 'fine') expectedKinds = new Set([kind]);
     else if (kind === 'rewrite' && Object.values(REWRITE_TARGETS).includes(rewriteTarget)) expectedKinds = new Set([rewriteTarget]);
-    else return fail('规划任务类型无效');
+    if (!expectedKinds.size) return fail('规划任务类型无效');
     if (blocks.some(block => !expectedKinds.has(block.kind))) return fail('规划输出含有不属于当前任务的提纲层级');
     const overall = blocks.filter(block => block.kind === 'overall');
     const volumes = blocks.filter(block => block.kind === 'volume');
@@ -171,6 +182,12 @@
     if (kind === 'volume' && !volumes.length) return fail('卷纲补充任务没有返回卷纲');
     if (kind === 'event' && !events.length) return fail('事件纲任务没有返回事件纲');
     if (kind === 'fine' && !fines.length) return fail('细纲任务没有返回细纲');
+    if ((mode === 'single' || mode === 'split') && ['initial', 'volume'].includes(kind) && !events.length) {
+      return fail('上三纲必须包含事件纲');
+    }
+    if (mode === 'single' && ['initial', 'volume', 'event'].includes(kind) && !fines.length) {
+      return fail('单次调用必须包含细纲');
+    }
     if (kind === 'rewrite' && blocks.length !== 1) return fail('重写任务必须只返回一个目标提纲');
     return { ok: true, value: { overall: overall[0] ?? null, volumes, events, fines, blocks } };
   }
@@ -308,6 +325,14 @@
     delete next.pendingTurn;
     next.volumes = parsed.value.volumes.map(item => makeNode('volume', item, next,
       { parentId: overall.id, parentRevision: overall.revision, revision: planRevision }, idFactory));
+    const activeVolume = firstOpenStage(next.volumes);
+    next.events = (parsed.value.events ?? []).map(item => makeNode('event', item, next,
+      { parentId: activeVolume.node.id, parentRevision: activeVolume.node.revision,
+        parentStageId: activeVolume.stage.id, revision: planRevision }, idFactory));
+    const activeEvent = firstOpenStage(next.events);
+    next.fines = (parsed.value.fines ?? []).map(item => makeNode('fine', item, next,
+      { parentId: activeEvent.node.id, parentRevision: activeEvent.node.revision,
+        parentStageId: activeEvent.stage.id, revision: planRevision }, idFactory));
     next.updatedAt = new Date().toISOString();
     return { ok: true, state: next };
   }
@@ -343,7 +368,22 @@
     const nodes = items.map(item => makeNode(kind, item, state, { parentId, parentRevision, parentStageId }, idFactory));
     const next = { ...clone(state), planRevision: (state.planRevision ?? 0) + 1,
       [collection]: [...(state[collection] ?? []), ...nodes], updatedAt: new Date().toISOString() };
-    return { ok: true, state: next, nodes };
+    const created = [...nodes];
+    if (kind === 'volume' && parsed.value.events?.length) {
+      const activeVolume = firstOpenStage(nodes);
+      const events = parsed.value.events.map(item => makeNode('event', item, next,
+        { parentId: activeVolume.node.id, parentRevision: activeVolume.node.revision,
+          parentStageId: activeVolume.stage.id, revision: next.planRevision }, idFactory));
+      next.events.push(...events); created.push(...events);
+    }
+    if (['volume', 'event'].includes(kind) && parsed.value.fines?.length) {
+      const activeEvent = firstOpenStage(kind === 'event' ? nodes : created.filter(node => node.kind === 'event'));
+      const fines = parsed.value.fines.map(item => makeNode('fine', item, next,
+        { parentId: activeEvent.node.id, parentRevision: activeEvent.node.revision,
+          parentStageId: activeEvent.stage.id, revision: next.planRevision }, idFactory));
+      next.fines.push(...fines); created.push(...fines);
+    }
+    return { ok: true, state: next, nodes: created };
   }
 
   function firstOpenStage(nodes, predicate = () => true) {

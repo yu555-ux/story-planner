@@ -1,11 +1,13 @@
 (function initStoryPlannerModule(root, factory) {
   const planningModel = root.TWStoryPlannerModelV1
     ?? (typeof require === 'function' ? require('./planning-model.js') : null);
-  const api = factory(planningModel);
+  const defaultPresetSource = root.TWStoryPlannerDefaultPreset
+    ?? (typeof require === 'function' ? require('./default-preset.js') : null);
+  const api = factory(planningModel, defaultPresetSource);
   const isCommonJs = typeof module === 'object' && module.exports;
   if (isCommonJs) module.exports = api;
   else root.TWStoryPlannerEngineV1 = api;
-})(typeof globalThis !== 'undefined' ? globalThis : window, function createStoryPlannerModule(planningModel) {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function createStoryPlannerModule(planningModel, defaultPresetSource) {
   'use strict';
 
   const EXTENSION_ID = 'tw-story-planner-v1';
@@ -14,6 +16,7 @@
   const DEFAULT_LIMITS = Object.freeze({ maxTextLength: 240 });
   const DEFAULT_CONFIG = Object.freeze({
     enabled: false,
+    multiCall: false,
     apiurl: '',
     key: '',
     model: '',
@@ -28,7 +31,8 @@
   const MAX_PRESET_JSON_LENGTH = 1_000_000;
   const MARKERS = new Set(['personaDescription', 'charDescription', 'charPersonality', 'scenario', 'dialogueExamples', 'chatHistory', 'worldInfoBefore', 'worldInfoAfter']);
   function createDefaultPlannerPreset() {
-    return { id: DEFAULT_PRESET_ID, name: '默认预设', prompts: [], promptOrder: [], raw: {} };
+    if (!defaultPresetSource) return { id: DEFAULT_PRESET_ID, name: '变量剧情器', prompts: [], promptOrder: [], raw: {} };
+    return { ...importPlannerPreset(defaultPresetSource, '变量剧情器.json'), id: DEFAULT_PRESET_ID };
   }
   function selectPromptOrder(groups) {
     const valid = (Array.isArray(groups) ? groups : []).map((group, index) => ({
@@ -84,6 +88,24 @@
       const prompt = byId.get(order.identifier);
       return prompt && order.enabled !== false && prompt.enabled !== false ? [{ prompt, order: index }] : [];
     });
+  }
+  function presetForPlannerCall(preset, { multiCall = false, kind = 'initial', targetKind } = {}) {
+    if (!multiCall || kind === 'rewrite') return preset;
+    const fineCall = kind === 'fine' || (kind === 'rewrite' && targetKind === 'fine');
+    const excluded = fineCall ? /总纲|卷纲|事件纲/ : /细纲/;
+    const prompts = new Map((preset.prompts ?? []).map(prompt => [prompt.identifier, prompt]));
+    return { ...preset, promptOrder: (preset.promptOrder ?? []).filter(item =>
+      !excluded.test(String(prompts.get(item.identifier)?.name ?? ''))) };
+  }
+  function plannerScopeForTask(kind, multiCall, targetKind) {
+    if (kind === 'rewrite') return `${targetKind}_outline`;
+    const scopes = multiCall
+      ? { initial: 'overall_outline、volume_outline、event_outline',
+        volume: 'volume_outline、event_outline', event: 'event_outline', fine: 'fine_outline' }
+      : { initial: 'overall_outline、volume_outline、event_outline、fine_outline',
+        volume: 'volume_outline、event_outline、fine_outline',
+        event: 'event_outline、fine_outline', fine: 'fine_outline' };
+    return scopes[kind] ?? 'fine_outline';
   }
   function getTriggeredPlannerPrompts(preset, generationType = 'normal') {
     return getOrderedPlannerPrompts(preset).filter(({ prompt }) =>
@@ -352,11 +374,11 @@
   }
   function normalizePlannerPresetState(raw) {
     const presets = Array.isArray(raw?.plannerPresets) ? raw.plannerPresets.filter(item => isRecord(item) && Array.isArray(item.prompts) && Array.isArray(item.promptOrder)) : [];
-    const plannerPresets = presets.length ? presets : [createDefaultPlannerPreset()];
-    const validId = value => plannerPresets.some(item => item.id === value) ? value : null;
-    const activeOutlinePresetId = validId(raw?.activeOutlinePresetId) ?? plannerPresets[0].id;
-    const activeFinePresetId = validId(raw?.activeFinePresetId) ?? plannerPresets[0].id;
-    return { plannerPresets, activeOutlinePresetId, activeFinePresetId };
+    const chosen = presets.length > 1 && defaultPresetSource ? createDefaultPlannerPreset()
+      : presets.find(item => item.id === raw?.activeFinePresetId && item.promptOrder.length)
+      ?? presets.find(item => item.id === raw?.activeOutlinePresetId && item.promptOrder.length)
+      ?? presets.find(item => item.promptOrder.length) ?? presets[0] ?? createDefaultPlannerPreset();
+    return { plannerPresets: [chosen], activeOutlinePresetId: chosen.id, activeFinePresetId: chosen.id };
   }
   function validatePlannerPreset(preset) {
     const errors = [];
@@ -539,7 +561,8 @@
           .replace(/\{\{outlet::([^}]+)\}\}/g, (_, name) => (outlet.get(name.trim()) ?? []).map(item => item.content).join('\n\n'));
         const depth = Number(prompt.injection_depth ?? 0);
         const replacements = { user: context.userName, char: context.characterName, persona: context.personaDescription, description: context.characterDescription, personality: context.characterPersonality, scenario: context.scenario, mesExamples: context.dialogueExamples,
-          planner_kind: context.plannerKind, planner_context: context.plannerContext };
+          planner_kind: context.plannerKind, planner_context: context.plannerContext,
+          planner_scope: context.plannerScope };
         const withoutTrim = content.replace(/(?:\r?\n)*\{\{trim\}\}(?:\r?\n)*/gi, '');
         const withVariables = withoutTrim.replace(/\{\{(setvar|addvar|getvar)::([\s\S]*?)\}\}/gi, (_match, operation, rawArguments) => {
           const separator = rawArguments.indexOf('::');
@@ -922,7 +945,7 @@
     if (/^game_content 工具缺少非空 content 参数|^game_content 工具内容经过输出清理后为空/.test(message)) return { code: 'TOOL_CONTENT_EMPTY', message: 'game_content 工具返回了空内容。' };
     if (/^规划 API 返回了空内容|^规划 API 返回内容经过输出清理后为空/.test(message)) return { code: 'EMPTY_RESPONSE', message: '规划 API 返回空回复。' };
     if (/^API 设置不完整/.test(message)) return { code: 'CONFIG_INCOMPLETE', message: 'API 设置不完整；请填写地址和模型。' };
-    if (/^预设没有可发送的 Prompt/.test(message)) return { code: 'PRESET_EMPTY', message: '规划预设没有可发送的 Prompt；请导入或填写预设。' };
+    if (/^预设没有可发送的 Prompt/.test(message)) return { code: 'PRESET_EMPTY', message: '规划预设没有可发送的 Prompt；请填写预设。' };
     if (/^预设无法生成有效消息/.test(message)) return { code: 'PRESET_INVALID', message: '规划预设无法生成有效消息；请检查预设。' };
     if (/^世界书接口缺失|^世界书读取失败/.test(message)) return { code: 'WORLDBOOK_ERROR', message: '世界书读取失败；请检查绑定和酒馆接口。' };
     if (/^角色资料接口缺失|^当前 Persona 无法读取/.test(message)) return { code: 'CONTEXT_ERROR', message: '角色或玩家资料读取失败；请检查当前聊天。' };
@@ -942,6 +965,7 @@
     const source = isRecord(value) ? value : {};
     return {
       enabled: source.enabled === true,
+      multiCall: source.multiCall === true,
       apiurl: text(source.apiurl, 2048),
       key: typeof source.key === 'string' ? source.key.trim() : '',
       model: text(source.model, 120),
@@ -1279,6 +1303,11 @@
         .twsp-tabs{padding-bottom:8px}.twsp-panel{padding-top:16px}
       }
       .twsp-dialog [hidden]{display:none!important}
+      .twsp-multi-call-setting{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:15px 17px;border:1px solid var(--twsp-border);border-radius:13px;background:var(--twsp-surface);font-weight:650}
+      .twsp-multi-call-setting .twsp-hint{flex-basis:100%;order:2;margin:0;font-size:12px;font-weight:400}
+      .twsp-multi-call-toggle{min-height:44px;border-radius:999px}
+      .twsp-multi-call-toggle[aria-checked="true"]{border-color:#a9671c;color:#fff;background:#a9671c}
+      .twsp-preset-manage[open] .twsp-preset-card-actions{position:static;margin-top:8px;box-shadow:none}
       .twsp-dialog [data-tw-view="planningTask"]:empty,.twsp-dialog [data-tw-view="error"]:empty,
       .twsp-dialog [data-tw-view="presetStatus"]:empty,.twsp-dialog [data-tw-view="presetPreview"]:empty{display:none}
     `;
@@ -1464,6 +1493,14 @@
     grid.append(apiurl.wrapper, key.wrapper, modelField);
     const paramsGrid = element('div', 'twsp-grid twsp-params-grid');
     paramsGrid.append(timeout.wrapper, retryCount.wrapper, parameterRow);
+    const multiCallButton = button('多次调用：关闭', 'toggleMultiCall');
+    multiCallButton.setAttribute('role', 'switch');
+    multiCallButton.setAttribute('aria-checked', 'false');
+    multiCallButton.className += ' twsp-multi-call-toggle';
+    const multiCallSetting = element('div', 'twsp-multi-call-setting');
+    multiCallSetting.append(element('div', '', '分层生成'),
+      element('p', 'twsp-hint', '关闭：一次请求生成当前缺少的层级；开启：上三纲与细纲分开请求。'), multiCallButton);
+    paramsGrid.append(multiCallSetting);
     const advanced = element('div', 'twsp-advanced');
     const keyStatus = mark(element('p', 'twsp-hint'), 'view', 'keyStatus');
     const checkStatus = mark(element('p', 'twsp-hint'), 'view', 'checkStatus');
@@ -1494,7 +1531,7 @@
     const diagnosticsSection = settingsSection('连接与诊断', 'stethoscope');
     const diagnosticActions = element('div', 'twsp-actions');
     diagnosticActions.append(testButton, toolProbeButton);
-    diagnosticsSection.append(advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；导出前请检查是否包含数据。'), diagnosticActions);
+    diagnosticsSection.append(advanced, keyStatus, element('p', 'twsp-hint', '连接信息保存在酒馆扩展设置中；API 密钥不会写入预设。'), diagnosticActions);
     settingsPanel.append(connectionSection, parametersSection, diagnosticsSection, checkStatus, settingsActions);
     const presetsPanel = element('section', 'twsp-panel');
     presetsPanel.id = 'twsp-presets-panel'; presetsPanel.setAttribute('role', 'tabpanel');
@@ -1503,18 +1540,6 @@
     const presetsHeadingText = element('div');
     presetsHeadingText.append(element('span', 'twsp-eyebrow', 'WRITING PRESETS'), element('h3', 'twsp-page-title', '预设'), element('p', 'twsp-page-description', '整理规划时使用的提示词'));
     presetsHeading.append(presetsHeadingText);
-    const outlinePresetRole = element('label', 'twsp-field');
-    outlinePresetRole.append(element('span', '', '总纲／卷纲／事件纲预设'));
-    const outlinePresetSelect = mark(element('select', 'twsp-input'), 'field', 'activeOutlinePreset');
-    outlinePresetRole.append(outlinePresetSelect);
-    const finePresetRole = element('label', 'twsp-field');
-    finePresetRole.append(element('span', '', '细纲预设'));
-    const finePresetSelect = mark(element('select', 'twsp-input'), 'field', 'activeFinePreset');
-    finePresetRole.append(finePresetSelect);
-    const presetRoleGrid = element('div', 'twsp-grid twsp-params-grid');
-    presetRoleGrid.append(outlinePresetRole, finePresetRole);
-    const presetSelect = mark(element('select', 'twsp-input'), 'field', 'presetSelect');
-    presetSelect.hidden = true;
     const presetName = field('预设名称', 'presetName');
     presetName.wrapper.className += ' twsp-preset-editname';
     presetName.wrapper.hidden = true;
@@ -1524,33 +1549,19 @@
     const presetStatus = mark(element('p', 'twsp-hint'), 'view', 'presetStatus');
     presetStatus.setAttribute('role', 'status');
     const presetPreview = mark(element('pre', 'twsp-raw'), 'view', 'presetPreview');
-    const importInput = mark(element('input', 'twsp-input'), 'field', 'importPreset');
-    importInput.type = 'file'; importInput.accept = '.json,application/json';
-    importInput.multiple = true;
-    const importPresetButton = button('导入预设', 'importPresetButton');
     const presetActions = element('div', 'twsp-actions twsp-preset-actions');
-    const newPresetButton = button('新建', 'newPreset');
     const addPromptButton = button('新增 Prompt', 'addPrompt');
     const checkPresetButton = button('检查预设', 'checkPreset');
     const previewPresetButton = button('模拟发送预览', 'previewPreset');
     const copyCurrentPromptButton = button('复制提示词正文', 'copyCurrentPrompt');
     const savePresetButton = button('保存预设', 'savePreset', 'twsp-button twsp-button--primary');
     presetActions.append(checkPresetButton, previewPresetButton, copyCurrentPromptButton, savePresetButton);
-    newPresetButton.textContent = '＋ 新建预设';
-    newPresetButton.className = 'twsp-button twsp-button--primary';
-    presetsHeading.append(newPresetButton);
     addPromptButton.textContent = '＋ 新增 Prompt';
     addPromptButton.className += ' twsp-add-prompt';
     const promptSectionHeading = element('div', 'twsp-list-heading twsp-prompt-list-heading');
     promptSectionHeading.append(element('h4', '', '提示词'), addPromptButton);
-    const presetSelectLabel = element('label', 'twsp-field');
-    presetSelectLabel.className += ' twsp-preset-internal';
-    presetSelectLabel.append(element('span', '', '当前预设'), presetSelect);
-    presetSelectLabel.hidden = true;
-    const importLabel = element('label', 'twsp-preset-import');
-    importLabel.append(element('span', '', '导入 Chat Completion 预设 JSON'), importInput);
-    presetsPanel.append(presetsHeading, presetRoleGrid, presetCards, presetSelectLabel, importLabel, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
-      element('p', 'twsp-hint twsp-preset-footnote', '规划请求只发送预设消息，不追加内置任务提示词。可在预设中使用 {{planner_kind}} 和 {{planner_context}}；温度与最大 token 以设置页为准。'));
+    presetsPanel.append(presetsHeading, presetCards, presetName.wrapper, presetCompatibility, promptSectionHeading, presetRows, presetActions, presetStatus, presetPreview,
+      element('p', 'twsp-hint twsp-preset-footnote', '规划请求只发送预设消息，不追加隐藏提示词。任务说明可使用 {{planner_kind}}、{{planner_scope}} 和 {{planner_context}}；温度与最大 token 以设置页为准。'));
     shell.append(header, tabs, resultPanel, settingsPanel, presetsPanel);
     root.append(style, shell);
     doc.body.append(root);
@@ -1585,79 +1596,32 @@
     function invalidatePreview() {
       if (previewStamp) { previewStamp = null; presetStatus.textContent = '发送预览已过期；请重新查看。'; }
     }
-    function selectPresetById(id) {
-      if (id === presetDraft.id && id === presetState.activeFinePresetId) return true;
-      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再切换。'; return false; }
-      const next = presetState.plannerPresets.find(item => item.id === id);
-      if (!next) return false;
-      presetState.activeFinePresetId = id;
-      try { presetState = options.savePresetState(presetState); }
-      catch (error) { presetStatus.textContent = `切换失败：${error.message}`; return false; }
-      presetDraft = presetState.plannerPresets.find(item => item.id === id) ?? next;
-      expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
-      invalidatePreview(); renderPresetEditor(); render(false); return true;
-    }
-    function assignPresetRole(kind, id) {
-      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再切换。'; return false; }
-      const field = kind === 'outline' ? 'activeOutlinePresetId' : 'activeFinePresetId';
-      if (!presetState.plannerPresets.some(item => item.id === id)) return false;
-      const next = structuredClone(presetState);
-      next[field] = id;
-      try { presetState = options.savePresetState(next); }
-      catch (error) { presetStatus.textContent = `预设切换失败：${error.message}`; renderPresetEditor(); return false; }
-      if (kind === 'fine') {
-        presetDraft = presetState.plannerPresets.find(item => item.id === id) ?? presetDraft;
-        expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
-        invalidatePreview();
-      }
-      renderPresetEditor(); render(false); return true;
-    }
-    function deletePresetById(id) {
-      const target = presetState.plannerPresets.find(item => item.id === id);
-      if (!target) return;
-      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再删除。'; return; }
-      if (presetState.plannerPresets.length <= 1) { presetStatus.textContent = '至少保留一份预设。'; return; }
+    function restoreDefaultPreset() {
+      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再恢复默认。'; return; }
       const overlay = mark(element('div', 'twsp-delete-overlay'), 'view', 'deletePresetDialog');
       overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
       const dialog = element('section', 'twsp-delete-dialog');
-      const heading = element('header', 'twsp-delete-dialog-header', '确认删除');
+      const heading = element('header', 'twsp-delete-dialog-header', '恢复默认预设');
       const body = element('div', 'twsp-delete-dialog-body');
-      body.append(element('p', '', `确定删除预设“${target.name}”吗？`));
+      body.append(element('p', '', '这会用内置预设替换当前词块和名称。确定继续吗？'));
       const actions = element('div', 'twsp-delete-dialog-actions');
       const cancel = button('取消', 'cancelDeletePreset');
-      const confirm = button('确认删除', 'confirmDeletePreset', 'twsp-button twsp-button--primary');
+      const confirm = button('恢复默认', 'confirmDeletePreset', 'twsp-button twsp-button--primary');
       cancel.addEventListener('click', () => overlay.remove());
       confirm.addEventListener('click', () => {
-        const next = structuredClone(presetState);
-        next.plannerPresets = next.plannerPresets.filter(item => item.id !== id);
-        if (next.activeFinePresetId === id) next.activeFinePresetId = next.plannerPresets[0].id;
-        if (next.activeOutlinePresetId === id) next.activeOutlinePresetId = next.plannerPresets[0].id;
+        const restored = createDefaultPlannerPreset();
+        const next = { plannerPresets: [restored], activeFinePresetId: restored.id, activeOutlinePresetId: restored.id };
         try { presetState = options.savePresetState(next); }
-        catch (error) { presetStatus.textContent = `删除失败：${error.message}`; return; }
-        presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activeFinePresetId);
+        catch (error) { presetStatus.textContent = `恢复失败：${error.message}`; return; }
+        presetDraft = presetState.plannerPresets[0];
         expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
-        invalidatePreview(); renderPresetEditor(); render(false); overlay.remove(); presetStatus.textContent = '预设已删除。';
+        invalidatePreview(); renderPresetEditor(); render(false); overlay.remove(); presetStatus.textContent = '已恢复内置预设。';
       });
       actions.append(cancel, confirm); body.append(actions); dialog.append(heading, body); overlay.append(dialog); root.append(overlay);
     }
-    function downloadPreset(preset) {
-      const content = JSON.stringify(exportPlannerPreset(preset), null, 2);
-      const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-      const anchor = doc.createElement('a'); anchor.href = url; anchor.download = `${preset.name || 'planner-preset'}.json`;
-      anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
     function renderPresetEditor() {
-      presetSelect.replaceChildren();
-      outlinePresetSelect.replaceChildren();
-      finePresetSelect.replaceChildren();
       presetCards.replaceChildren();
       presetCompatibility.replaceChildren();
-      for (const item of presetState.plannerPresets) {
-        const outlineOption = element('option', '', item.name); outlineOption.value = item.id; outlinePresetSelect.append(outlineOption);
-        const fineOption = element('option', '', item.name); fineOption.value = item.id; finePresetSelect.append(fineOption);
-      }
-      outlinePresetSelect.value = presetState.activeOutlinePresetId;
-      finePresetSelect.value = presetState.activeFinePresetId;
       const spreset = getSPresetSettings(presetDraft);
       if (spreset.present) {
         presetCompatibility.append(element('p', '', `SPreset · ${spreset.summary}`));
@@ -1668,54 +1632,41 @@
         const prompt = preset.prompts.find(value => value.identifier === order.identifier);
         return order.enabled !== false && prompt && prompt.enabled !== false;
       }).length;
-      const orderedPresets = [presetDraft, ...presetState.plannerPresets.filter(item => item.id !== presetDraft.id)];
+      const orderedPresets = [presetDraft];
       for (const item of orderedPresets) {
-        const option = element('option', '', item.name); option.value = item.id; presetSelect.append(option);
         const card = element('article', 'twsp-preset-card');
-        const selected = item.id === presetDraft.id;
+        const selected = true;
         card.dataset.selected = String(selected);
         card.setAttribute('aria-current', String(selected));
         const info = element('div', 'twsp-preset-card-info');
-        info.append(element('span', 'twsp-card-caption', selected ? '当前预设' : '其他预设'));
+        info.append(element('span', 'twsp-card-caption', '当前预设'));
         const name = button(item.name, `presetCardName-${item.id}`, 'twsp-preset-card-name');
         const enabledCount = countEnabledPrompts(item);
-        const assignedRoles = [item.id === presetState.activeOutlinePresetId ? '总纲／卷纲／事件纲' : '',
-          item.id === presetState.activeFinePresetId ? '细纲' : ''].filter(Boolean).join('、');
-        const status = element('small', 'twsp-preset-card-status', `${selected ? '正在编辑' : '可切换'}${assignedRoles ? ` · 用于${assignedRoles}` : ''} · ${enabledCount} 条提示词已启用`);
+        const status = element('small', 'twsp-preset-card-status', `上三纲与细纲共用 · ${enabledCount} 条提示词已启用`);
         if (selected) selectedStatus = status;
         info.append(name, status);
         const controls = element('div', 'twsp-preset-card-controls');
-        if (selected) controls.append(importPresetButton);
-        else {
-          const choose = button('切换', `selectPreset-${item.id}`);
-          choose.setAttribute('aria-label', `选择预设 ${item.name}`);
-          choose.addEventListener('click', () => selectPresetById(item.id));
-          controls.append(choose);
-        }
         const manage = element('details', 'twsp-preset-manage');
         const manageSummary = element('summary', '', '管理');
         manageSummary.setAttribute('aria-label', `管理预设 ${item.name}`);
         const actions = element('div', 'twsp-preset-card-actions');
-        const exportCard = button('导出', `exportPreset-${item.id}`, 'twsp-preset-menu-action');
         const editCard = button('重命名', `editPreset-${item.id}`, 'twsp-preset-menu-action');
-        const deleteCard = button('删除', `deletePreset-${item.id}`, 'twsp-preset-menu-action twsp-danger');
-        name.addEventListener('click', () => selectPresetById(item.id));
-        exportCard.addEventListener('click', () => downloadPreset(item));
+        const restoreCard = button('恢复默认', `restorePreset-${item.id}`, 'twsp-preset-menu-action twsp-danger');
+        name.addEventListener('click', () => { presetName.wrapper.hidden = false; presetName.input.focus?.(); });
         editCard.addEventListener('click', () => {
-          if (item.id !== presetDraft.id && !selectPresetById(item.id)) return;
           presetName.wrapper.hidden = false; presetName.input.focus?.();
+          manage.open = false;
         });
-        deleteCard.addEventListener('click', () => deletePresetById(item.id));
-        actions.append(exportCard, editCard, deleteCard);
+        restoreCard.addEventListener('click', () => { manage.open = false; restoreDefaultPreset(); });
+        actions.append(editCard, restoreCard);
         manage.append(manageSummary, actions);
         controls.append(manage);
         card.append(info, controls); presetCards.append(card);
       }
-      presetSelect.value = presetDraft.id;
       presetName.input.value = presetDraft.name;
       presetRows.replaceChildren();
       if (!presetDraft.promptOrder.length) {
-        presetRows.append(mark(element('p', 'twsp-hint', '当前预设没有词块。可以导入预设，或点击“新增 Prompt”开始编辑。'), 'view', 'emptyPresetHint'));
+        presetRows.append(mark(element('p', 'twsp-hint', '当前预设没有词块。点击“新增 Prompt”开始编辑，或恢复内置预设。'), 'view', 'emptyPresetHint'));
       }
       for (const item of presetDraft.promptOrder) {
         const prompt = presetDraft.prompts.find(value => value.identifier === item.identifier);
@@ -1917,12 +1868,12 @@
       variableStatus.textContent = stateLabels[need] ?? '规划状态待检查';
       variableStatus.dataset.state = need;
       const instructions = {
-        initial: '首次正常生成前会依次准备总纲、卷纲、事件纲和细纲。',
+        initial: view.config.multiCall ? '首次生成前分两次准备上三纲和细纲。' : '首次生成前一次准备当前所需的四层提纲。',
         volume: '下一次正文生成前领取或生成下一卷。',
         event: '下一次正文生成前为当前卷纲阶段补充事件纲。',
         fine: '下一次正文生成前为当前事件阶段补充细纲。',
         rewrite: '下一次正文生成前处理待重写提纲。',
-        ready: '三层活动阶段已齐备；只有正文回报完成后才推进。',
+        ready: '四层活动阶段已齐备；只有正文回报完成后才推进。',
       };
       variablePlannerHelp.textContent = [view.variablePlannerStatus, instructions[need]].filter(Boolean).join(' ');
       variableLayers.replaceChildren();
@@ -1979,14 +1930,20 @@
         event: '<event_outline>\n事件名：\n事件定位：\n事件目标：\n核心剧情：\n阶段1：\n  阶段目标：\n  核心情节：\n  结尾收束：\n</event_outline>',
         fine: '<fine_outline>\n阶段1：\n  剧情目的：\n  时间：\n  地点：\n  核心情节：\n  结尾收束：\n</fine_outline>',
       };
-      variablePlannerDraft.placeholder = need === 'rewrite'
-        ? templates[view.variablePlannerNeed?.targetKind] ?? '' : templates[need] ?? '';
+      const templateKind = need === 'rewrite' ? view.variablePlannerNeed?.targetKind : need;
+      variablePlannerDraft.placeholder = templates[templateKind] ?? '';
+      if (need === 'initial' || need === 'volume') variablePlannerDraft.placeholder += `\n${templates.event}`;
+      if (!view.config.multiCall && ['initial', 'volume', 'event'].includes(need)) {
+        variablePlannerDraft.placeholder += `\n${templates.fine}`;
+      }
       saveVariablePlannerDraftButton.disabled = need === 'ready' || Boolean(planModel?.pendingTurn)
         || Boolean(view.variablePlannerRunning);
       resultError.textContent = [view.variablePlannerError, view.persistenceError].filter(Boolean).join('；');
       retrySaveButton.hidden = !view.variablePlannerError;
       retrySaveButton.disabled = !view.variablePlannerError;
       keyStatus.textContent = view.config.key ? 'API 密钥已保存。' : '尚未填写密钥；无密钥接口可留空。';
+      multiCallButton.textContent = `多次调用：${view.config.multiCall ? '开启' : '关闭'}`;
+      multiCallButton.setAttribute('aria-checked', String(view.config.multiCall));
       if (activeTab === 'presets' && previewStamp && previewContextHash && Date.now() - lastPreviewCheck > 5000) {
         lastPreviewCheck = Date.now(); const stamp = previewStamp;
         Promise.resolve(options.checkPreviewFresh?.(previewContextHash)).then(current => { if (stamp === previewStamp && current === false) invalidatePreview(); }).catch(() => invalidatePreview());
@@ -2081,17 +2038,6 @@
       if (visibleName) visibleName.textContent = presetDraft.name;
       markPresetDirty();
     });
-    presetSelect.addEventListener('change', () => { if (!selectPresetById(presetSelect.value)) presetSelect.value = presetDraft.id; });
-    outlinePresetSelect.addEventListener('change', () => assignPresetRole('outline', outlinePresetSelect.value));
-    finePresetSelect.addEventListener('change', () => assignPresetRole('fine', finePresetSelect.value));
-    importPresetButton.addEventListener('click', () => importInput.click?.());
-    newPresetButton.addEventListener('click', () => {
-      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存。'; return; }
-      presetDraft = structuredClone(createDefaultPlannerPreset());
-      presetDraft.id = `preset-${fnv1a(`${Date.now()}-${Math.random()}`)}`;
-      presetDraft.name = '新剧情预设'; presetState.plannerPresets.push(presetDraft);
-      presetState.activeFinePresetId = presetDraft.id; markPresetDirty(); renderPresetEditor();
-    });
     addPromptButton.addEventListener('click', () => {
       const identifier = `custom-${fnv1a(`${Date.now()}-${Math.random()}`)}`;
       presetDraft.prompts.push({ identifier, name: '新提示词', role: 'system', content: '', enabled: true,
@@ -2099,39 +2045,11 @@
         marker: false, system_prompt: false, forbid_overrides: false });
       presetDraft.promptOrder.push({ identifier, enabled: true }); markPresetDirty(); renderPresetEditor();
     });
-    importInput.addEventListener('change', async () => {
-      if (presetDirty) { presetStatus.textContent = '当前草稿未保存，请先保存再导入。'; return; }
-      const files = Array.from(importInput.files ?? []);
-      const importedPresets = []; const errors = [];
-      for (const file of files) {
-        try {
-          const imported = importPlannerPreset(await file.text(), file.name);
-          importedPresets.push(imported);
-        } catch (error) { errors.push(`${file.name}：${error.message}`); }
-      }
-      importInput.value = '';
-      if (importedPresets.length) {
-        try {
-          presetState = options.savePresetState({
-            ...presetState,
-            plannerPresets: [...presetState.plannerPresets, ...importedPresets],
-            activeFinePresetId: importedPresets[0].id,
-          });
-          presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activeFinePresetId);
-          expandedPromptIds.clear(); expandedAdvancedIds.clear(); presetName.wrapper.hidden = true;
-          invalidatePreview(); renderPresetEditor(); render(false);
-        } catch (error) {
-          presetStatus.textContent = `导入保存失败：${error.message}`; return;
-        }
-      }
-      presetStatus.textContent = importedPresets.length
-        ? `成功导入 ${importedPresets.length} 个预设。${errors.length ? `失败 ${errors.length} 个：${errors.join('；')}` : ''}`
-        : errors.length ? `导入失败：${errors.join('；')}` : '';
-    });
     savePresetButton.addEventListener('click', () => {
       try {
-        presetState = options.savePresetState({ ...presetState, activeFinePresetId: presetDraft.id });
-        presetDraft = presetState.plannerPresets.find(item => item.id === presetState.activeFinePresetId);
+        presetState = options.savePresetState({ plannerPresets: [presetDraft],
+          activeFinePresetId: presetDraft.id, activeOutlinePresetId: presetDraft.id });
+        presetDraft = presetState.plannerPresets[0];
         presetDirty = false; previewStamp = null; presetPreview.textContent = '';
         presetStatus.textContent = '预设已保存，旧发送预览已过期。'; renderPresetEditor(); render(false);
       } catch (error) { presetStatus.textContent = `保存失败：${error.message}`; }
@@ -2350,6 +2268,11 @@
       render(false);
       await confirmConfigSave(Object.keys(errors).length > 0);
     });
+    multiCallButton.addEventListener('click', async () => {
+      options.saveConfig({ multiCall: !options.getViewModel().config.multiCall });
+      render(false);
+      await confirmConfigSave();
+    });
     toggleEnabledButton.addEventListener('click', async () => {
       const nextEnabled = !options.getViewModel().config.enabled;
       options.saveConfig({ enabled: nextEnabled });
@@ -2399,7 +2322,11 @@
   function createTavernRuntime(globals, requestedConfig = {}) {
     assertRuntimeCapabilities(globals);
     let config = normalizeConfig({ ...DEFAULT_CONFIG, ...requestedConfig });
-    let presetState = normalizePlannerPresetState(globals.getVariables({ type: 'script' }));
+    const storedPresetState = globals.getVariables({ type: 'script' });
+    let presetState = normalizePlannerPresetState(storedPresetState);
+    if ((storedPresetState?.plannerPresets?.length ?? 0) > 1) {
+      globals.updateVariablesWith(variables => ({ ...variables, ...presetState }), { type: 'script' });
+    }
     const log = globals.console ?? console;
     const disposers = [];
     let lastSentPrompt = null;
@@ -2739,13 +2666,24 @@
       return structuredClone(next);
     }
     async function previewPreset(preset) {
-      if (!hasEffectivePlannerPrompt(preset)) return { blocks: [], messages: [], request: { ordered_prompts: [] }, diagnostics: ['预设没有可发送的 Prompt，请先导入预设或新增并填写词块'], contextHash: null };
+      const need = getVariablePlannerNeed();
+      const kind = need.kind === 'ready' ? 'initial' : need.kind;
+      const selected = presetForPlannerCall(preset, { multiCall: config.multiCall, kind, targetKind: need.targetKind });
+      if (!hasEffectivePlannerPrompt(selected)) return { blocks: [], messages: [], request: { ordered_prompts: [] }, diagnostics: ['预设没有可发送的 Prompt，请新增并填写词块'], contextHash: null };
       const snapshot = readSnapshot();
-      const context = await readPlannerContext(globals, snapshot);
-      return { ...prepareRequest(preset, context), contextHash: fnv1a(JSON.stringify(context)) };
+      const context = await readPlannerContext(globals, snapshot, kind === 'initial' ? 'initial' : 'normal');
+      context.plannerKind = kind === 'rewrite' ? `rewrite:${need.targetKind}` : kind;
+      context.plannerContext = getVariablePlannerTaskContext(getVariablePlannerState(), need);
+      context.plannerScope = plannerScopeForTask(kind, config.multiCall, need.targetKind);
+      return { ...prepareRequest(selected, context), contextHash: fnv1a(JSON.stringify(context)) };
     }
     async function checkPreviewFresh(hash) {
-      const context = await readPlannerContext(globals, readSnapshot());
+      const need = getVariablePlannerNeed();
+      const kind = need.kind === 'ready' ? 'initial' : need.kind;
+      const context = await readPlannerContext(globals, readSnapshot(), kind === 'initial' ? 'initial' : 'normal');
+      context.plannerKind = kind === 'rewrite' ? `rewrite:${need.targetKind}` : kind;
+      context.plannerContext = getVariablePlannerTaskContext(getVariablePlannerState(), need);
+      context.plannerScope = plannerScopeForTask(kind, config.multiCall, need.targetKind);
       return fnv1a(JSON.stringify(context)) === hash;
     }
     async function checkPreset(preset) {
@@ -2811,7 +2749,9 @@
     }
     function initializeVariablePlanner(rawText) {
       if (activeVariablePlannerJob) throw new Error('自动规划正在运行，请等待当前规划请求结束');
-      const parsed = planningModel.parsePlannerOutput(rawText, { kind: 'initial' });
+      const parsed = planningModel.parsePlannerOutput(rawText, {
+        kind: 'initial', mode: config.multiCall ? 'split' : 'single',
+      });
       if (!parsed.ok) throw new Error(parsed.error);
       const current = getVariablePlannerState({ create: true });
       if (current.pendingTurn) throw new Error('本轮阶段快照正在使用，结束或停止生成后再修改计划');
@@ -2821,7 +2761,9 @@
     }
     function appendVariablePlannerBatch({ kind, rawText, parentId, parentRevision, parentStageId } = {}) {
       if (activeVariablePlannerJob) throw new Error('自动规划正在运行，请等待当前规划请求结束');
-      const parsed = planningModel.parsePlannerOutput(rawText, { kind });
+      const parsed = planningModel.parsePlannerOutput(rawText, {
+        kind, mode: config.multiCall ? 'split' : 'single',
+      });
       if (!parsed.ok) throw new Error(parsed.error);
       const current = getVariablePlannerState();
       if (!current) throw new Error('请先创建新版变量剧情计划');
@@ -2922,14 +2864,17 @@
       assertVariablePlannerJobCurrent(job);
       if (Object.keys(validateConfig(job.config)).length) throw new Error('API 设置不完整');
       const presetKind = kind === 'fine' || (kind === 'rewrite' && need.targetKind === 'fine') ? 'fine' : 'outline';
-      const preset = activePreset(presetKind);
+      const preset = presetForPlannerCall(activePreset(presetKind), {
+        multiCall: job.config.multiCall, kind, targetKind: need.targetKind,
+      });
       if (!hasEffectivePlannerPrompt(preset, generationType)) {
-        throw new Error(`${presetKind === 'fine' ? '细纲' : '上层规划'}预设没有可发送的 Prompt，请先导入或填写预设`);
+        throw new Error(`${presetKind === 'fine' ? '细纲' : '上层规划'}预设没有可发送的 Prompt，请先填写预设`);
       }
       const context = await readPlannerContext(globals, readSnapshot(), generationType);
       assertVariablePlannerJobCurrent(job);
       context.plannerKind = kind === 'rewrite' ? `rewrite:${need.targetKind}` : kind;
       context.plannerContext = getVariablePlannerTaskContext(state, need);
+      context.plannerScope = plannerScopeForTask(kind, job.config.multiCall, need.targetKind);
       const final = structuredClone(prepareRequest(preset, context));
       if (final.diagnostics.some(issue => issue.includes('宏 {{last_maintext}} 未找到'))) {
         throw new Error('最新助手回复缺少 <maintext>/<content> 正文');
@@ -2972,6 +2917,7 @@
           if (!result.ok) throw new Error(result.error);
           const parsed = planningModel.parsePlannerOutput(result.value.rawText, {
             kind, rewriteTarget: kind === 'rewrite' ? need.targetKind : undefined,
+            mode: kind === 'rewrite' ? undefined : job.config.multiCall ? 'split' : 'single',
           });
           if (!parsed.ok) {
             const error = new Error(parsed.error);
@@ -3052,7 +2998,9 @@
             becameReady = true;
             return planningModel.getActivePlanSnapshot(state);
           }
-          const labels = { initial: '总纲与首批卷纲', volume: '卷纲批次', event: '当前卷纲阶段的事件纲批次',
+          const labels = { initial: job.config.multiCall ? '上三纲' : '四层提纲',
+            volume: job.config.multiCall ? '卷纲与事件纲' : '卷纲、事件纲与细纲',
+            event: job.config.multiCall ? '事件纲' : '事件纲与细纲',
             fine: '当前事件纲阶段的细纲批次', rewrite: `待重写${({ volume: '卷纲', event: '事件纲', fine: '细纲' })[need.targetKind] ?? '提纲'}` };
           setVariablePlannerStatus(`正在调用规划 API：${labels[need.kind] ?? '补充提纲'}。`);
           const expectedPlanRevision = state.planRevision;
@@ -3328,6 +3276,7 @@
     importPlannerPreset,
     exportPlannerPreset,
     getOrderedPlannerPrompts,
+    presetForPlannerCall,
     normalizePlannerPresetState,
     validatePlannerPreset,
     readPlannerContext,
